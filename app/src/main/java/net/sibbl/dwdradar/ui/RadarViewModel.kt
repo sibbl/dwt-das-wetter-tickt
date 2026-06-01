@@ -74,6 +74,7 @@ class RadarViewModel(
     private var longPressLocationRefreshGeneration = 0
     private var hasSavedMapCenter = mapCameraPreferenceStore.hasSavedCenter()
     private var hasCenteredOnLocation = hasSavedMapCenter
+    private var menuClosedTimeMillis: Long = 0L
     var isLayerMenuOpen: Boolean = false
         private set
 
@@ -245,6 +246,10 @@ class RadarViewModel(
     }
 
     fun scrubByRotary(deltaTicks: Float) {
+        if (android.os.SystemClock.uptimeMillis() - menuClosedTimeMillis < ROTARY_CLOSE_COOLDOWN_MILLIS) {
+            rotaryStepAccumulator.reset()
+            return
+        }
         val timeline = _uiState.value.timeline
         if (timeline.frames.isEmpty()) {
             return
@@ -287,6 +292,9 @@ class RadarViewModel(
 
     fun setLayerMenuOpen(open: Boolean) {
         isLayerMenuOpen = open
+        if (!open) {
+            menuClosedTimeMillis = android.os.SystemClock.uptimeMillis()
+        }
         _uiState.update { state ->
             state.copy(
                 layerMenuExpanded = open,
@@ -313,6 +321,7 @@ class RadarViewModel(
             val shouldClose = deltaTicks < 0f && state.layerMenuScrollDp <= 0f && nextScroll <= 0f
             if (shouldClose) {
                 isLayerMenuOpen = false
+                menuClosedTimeMillis = android.os.SystemClock.uptimeMillis()
                 state.copy(
                     layerMenuExpanded = false,
                     layerMenuScrollDp = 0f
@@ -995,5 +1004,6 @@ class RadarViewModel(
         const val TIMELINE_LOAD_ATTEMPTS = 3
         const val TIMELINE_RETRY_DELAY_MILLIS = 450L
         const val ZOOM_SWIPE_PIXELS_PER_STEP = 42f
+        const val ROTARY_CLOSE_COOLDOWN_MILLIS = 500L
     }
 }
