@@ -212,6 +212,9 @@ class RadarViewModel(
     fun finishGestureInput() {
         radialStepAccumulator.reset()
         zoomSwipeAccumulator.reset()
+        val selectedIndex = _uiState.value.selectedFrameIndex
+        loadFrameAt(selectedIndex)
+        scheduleSmartPrefetch(selectedIndex)
     }
 
     fun retry() {

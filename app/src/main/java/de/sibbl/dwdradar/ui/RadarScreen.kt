@@ -52,6 +52,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
@@ -85,6 +87,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun RadarScreen(
@@ -271,13 +274,26 @@ fun RadarScreen(
                                 }
                                 onGestureEnd()
                             } else if (isZoomGestureCandidate) {
+                                val firstUpPosition = waitForPointerUpPosition(down.id) ?: return@awaitEachGesture
+                                val secondDown = withTimeoutOrNull(DOUBLE_TAP_DRAG_TIMEOUT_MILLIS) {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                } ?: return@awaitEachGesture
+                                val secondDownDistance = distanceBetween(secondDown.position, firstUpPosition)
+                                if (secondDownDistance > DOUBLE_TAP_DRAG_SAME_POINT_DP.dp.toPx()) {
+                                    return@awaitEachGesture
+                                }
+
+                                secondDown.consume()
                                 var totalX = 0f
                                 var totalY = 0f
                                 var zoomActive = false
                                 while (true) {
                                     val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    val change = event.changes.firstOrNull { it.id == secondDown.id } ?: break
                                     if (!change.pressed) {
+                                        if (zoomActive) {
+                                            change.consume()
+                                        }
                                         break
                                     }
                                     val delta = change.positionChange()
@@ -984,6 +1000,16 @@ private fun positiveModulo(value: Int, modulo: Int): Int {
     return ((value % modulo) + modulo) % modulo
 }
 
+private suspend fun AwaitPointerEventScope.waitForPointerUpPosition(pointerId: PointerId): Offset? {
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: return null
+        if (!change.pressed) {
+            return change.position
+        }
+    }
+}
+
 private fun distanceBetween(first: Offset, second: Offset): Float {
     val dx = first.x - second.x
     val dy = first.y - second.y
@@ -1006,6 +1032,8 @@ private fun normalizedAngleDelta(deltaDegrees: Float): Float {
 }
 
 private const val BORDER_SCROLL_TOUCH_WIDTH_DP = 34
+private const val DOUBLE_TAP_DRAG_SAME_POINT_DP = 28
+private const val DOUBLE_TAP_DRAG_TIMEOUT_MILLIS = 320L
 private const val HOUR_MILLIS = 60 * 60 * 1000L
 private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
