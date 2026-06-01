@@ -168,38 +168,6 @@ fun RadarScreen(
         nowMillis = uiState.timeline.nowTimestampMillis
     )
     val zoomLabelText = zoomLabel(context, uiState.zoomPreset)
-    val infiniteTransition = rememberInfiniteTransition(label = "locationLoading")
-    val alphaLeft by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = keyframes {
-                durationMillis = 800
-                1f.at(0)
-                1f.at(399)
-                0f.at(400)
-                0f.at(799)
-            },
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "alphaLeft"
-    )
-    val alphaRight by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = keyframes {
-                durationMillis = 800
-                0f.at(0)
-                0f.at(399)
-                1f.at(400)
-                1f.at(799)
-            },
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "alphaRight"
-    )
-
     val overallAlpha by animateFloatAsState(
         targetValue = if (uiState.isLocationLoading) 1f else 0f,
         animationSpec = tween(durationMillis = 500),
@@ -525,28 +493,14 @@ fun RadarScreen(
             }
 
             if (overallAlpha > 0f) {
-                Row(
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
+                        .padding(top = 10.dp)
                         .alpha(overallAlpha),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .alpha(alphaLeft)
-                            .background(Color.White, RoundedCornerShape(50))
-                            .border(0.8.dp, Color.Black, RoundedCornerShape(50))
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .alpha(alphaRight)
-                            .background(Color.White, RoundedCornerShape(50))
-                            .border(0.8.dp, Color.Black, RoundedCornerShape(50))
-                    )
+                    ContrastLocationIcon()
                 }
             }
 
@@ -970,6 +924,39 @@ private fun MenuSheetContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ContrastLocationIcon(
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        listOf(
+            Offset(-0.6f, 0f),
+            Offset(0.6f, 0f),
+            Offset(0f, -0.6f),
+            Offset(0f, 0.6f),
+            Offset(-0.4f, -0.4f),
+            Offset(0.4f, -0.4f),
+            Offset(-0.4f, 0.4f),
+            Offset(0.4f, 0.4f)
+        ).forEach { borderOffset ->
+            Icon(
+                imageVector = Icons.Rounded.LocationOn,
+                contentDescription = null,
+                tint = Color.Black,
+                modifier = Modifier
+                    .size(8.dp)
+                    .offset(x = borderOffset.x.dp, y = borderOffset.y.dp)
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.LocationOn,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(8.dp)
+        )
     }
 }
 
