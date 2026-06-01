@@ -153,26 +153,97 @@ fun RadarScreen(
     )
     val relativeOffsetSteps = uiState.selectedFrameIndex - uiState.timeline.nowFrameIndex
     val selectedTimestamp = selectedReference?.timestampMillis ?: uiState.timeline.nowTimestampMillis
-    val selectedLoadProgress = selectedReference
-        ?.let { uiState.frameLoadProgress[it.timestampMillis] }
-        ?.coerceIn(0f, 1f)
-        ?: 0f
-    val selectedDisplayProgress = if (!selectedFrameReady && selectedLoadProgress >= 1f) {
-        FRAME_DECODE_PROGRESS_CAP
-    } else {
-        selectedLoadProgress
+    val selectedCloudReference = remember(uiState.selectedFrameIndex, uiState.cloudTimeline) {
+        val selectedTimestamp = selectedReference?.timestampMillis ?: uiState.timeline.nowTimestampMillis
+        if (uiState.cloudTimeline.frames.isEmpty()) {
+            null
+        } else {
+            uiState.cloudTimeline.frames.minByOrNull { reference ->
+                kotlin.math.abs(reference.timestampMillis - selectedTimestamp)
+            }
+        }
     }
-    val showSelectedLoadProgress = selectedReference != null && !selectedFrameReady
+    val selectedCloudFrameReady = uiState.selectedCloudFrame?.reference == selectedCloudReference
+
+    val showSelectedLoadProgress = when {
+        uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
+            (selectedReference != null && !selectedFrameReady) || 
+            (selectedCloudReference != null && !selectedCloudFrameReady)
+        }
+        uiState.rainLayerVisible -> {
+            selectedReference != null && !selectedFrameReady
+        }
+        uiState.cloudLayerVisible -> {
+            selectedCloudReference != null && !selectedCloudFrameReady
+        }
+        else -> false
+    }
+
+    val selectedDisplayProgress = remember(
+        uiState.rainLayerVisible,
+        uiState.cloudLayerVisible,
+        selectedReference,
+        selectedFrameReady,
+        selectedCloudReference,
+        selectedCloudFrameReady,
+        uiState.frameLoadProgress
+    ) {
+        val rainProgress = if (uiState.rainLayerVisible && selectedReference != null) {
+            uiState.frameLoadProgress[selectedReference.timestampMillis]?.coerceIn(0f, 1f) ?: 0f
+        } else {
+            1f
+        }
+        val cloudProgress = if (uiState.cloudLayerVisible && selectedCloudReference != null) {
+            uiState.frameLoadProgress[selectedCloudReference.timestampMillis]?.coerceIn(0f, 1f) ?: 0f
+        } else {
+            1f
+        }
+
+        val combinedProgress = when {
+            uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
+                (rainProgress + cloudProgress) / 2f
+            }
+            uiState.rainLayerVisible -> {
+                rainProgress
+            }
+            uiState.cloudLayerVisible -> {
+                cloudProgress
+            }
+            else -> 1f
+        }
+
+        val isReadyInViewModel = when {
+            uiState.rainLayerVisible && uiState.cloudLayerVisible -> selectedFrameReady && selectedCloudFrameReady
+            uiState.rainLayerVisible -> selectedFrameReady
+            uiState.cloudLayerVisible -> selectedCloudFrameReady
+            else -> true
+        }
+
+        if (!isReadyInViewModel && combinedProgress >= 1f) {
+            FRAME_DECODE_PROGRESS_CAP
+        } else {
+            combinedProgress
+        }
+    }
     val compactOffsetText = TimeFormatters.compactOffset(
         selectedMillis = selectedTimestamp,
         nowMillis = uiState.timeline.nowTimestampMillis
     )
     val zoomLabelText = zoomLabel(context, uiState.zoomPreset)
-    val overallAlpha by animateFloatAsState(
-        targetValue = if (uiState.isLocationLoading) 1f else 0f,
-        animationSpec = tween(durationMillis = 500),
-        label = "overallAlpha"
+    val locationPulseTransition = rememberInfiniteTransition(label = "locationPulse")
+    val locationPulseScaleState by locationPulseTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = 1000,
+                easing = LinearEasing
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "locationPulseScale"
     )
+    val locationPulseScale = if (uiState.isLocationLoading) locationPulseScaleState else 1.0f
     val timelineAccent = when {
         relativeOffsetSteps < 0 -> Color(0xFFD7B3FF)
         relativeOffsetSteps > 0 -> Color(0xFF8DEEFF)
@@ -477,7 +548,7 @@ fun RadarScreen(
                                 )
                                 drawCircle(
                                     color = Color.White,
-                                    radius = 1.8.dp.toPx(),
+                                    radius = 1.8.dp.toPx() * locationPulseScale,
                                     center = locationPoint
                                 )
                             }
@@ -492,22 +563,10 @@ fun RadarScreen(
                 }
             }
 
-            if (overallAlpha > 0f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 10.dp)
-                        .alpha(overallAlpha),
-                    contentAlignment = Alignment.Center
-                ) {
-                    ContrastLocationIcon()
-                }
-            }
-
             RadarGlassPill(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 21.dp)
+                    .padding(top = 16.dp)
                     .clickable {
                         timeRefreshPulseKey += 1
                         onRefreshData()
@@ -924,39 +983,6 @@ private fun MenuSheetContent(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ContrastLocationIcon(
-    modifier: Modifier = Modifier
-) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        listOf(
-            Offset(-0.6f, 0f),
-            Offset(0.6f, 0f),
-            Offset(0f, -0.6f),
-            Offset(0f, 0.6f),
-            Offset(-0.4f, -0.4f),
-            Offset(0.4f, -0.4f),
-            Offset(-0.4f, 0.4f),
-            Offset(0.4f, 0.4f)
-        ).forEach { borderOffset ->
-            Icon(
-                imageVector = Icons.Rounded.LocationOn,
-                contentDescription = null,
-                tint = Color.Black,
-                modifier = Modifier
-                    .size(8.dp)
-                    .offset(x = borderOffset.x.dp, y = borderOffset.y.dp)
-            )
-        }
-        Icon(
-            imageVector = Icons.Rounded.LocationOn,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(8.dp)
-        )
     }
 }
 

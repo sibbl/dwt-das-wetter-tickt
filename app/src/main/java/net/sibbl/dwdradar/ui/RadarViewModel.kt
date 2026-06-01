@@ -16,6 +16,7 @@ import net.sibbl.dwdradar.model.RadarTimeline
 import net.sibbl.dwdradar.model.ZoomPreset
 import net.sibbl.dwdradar.storage.RadarLayerPreferenceStore
 import net.sibbl.dwdradar.storage.MapCameraPreferenceStore
+import net.sibbl.dwdradar.storage.UserLocationPreferenceStore
 import java.util.LinkedHashMap
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Job
@@ -34,6 +35,7 @@ class RadarViewModel(
     private val locationRepository = LocationRepository(application)
     private val mapCameraPreferenceStore = MapCameraPreferenceStore(application)
     private val radarLayerPreferenceStore = RadarLayerPreferenceStore(application)
+    private val userLocationPreferenceStore = UserLocationPreferenceStore(application)
     private val rotaryStepAccumulator = RotaryStepAccumulator(ROTARY_TICKS_PER_STEP)
     private val radialStepAccumulator = RotaryStepAccumulator(RADIAL_DEGREES_PER_STEP)
     private val zoomSwipeAccumulator = RotaryStepAccumulator(ZOOM_SWIPE_PIXELS_PER_STEP)
@@ -61,7 +63,8 @@ class RadarViewModel(
             RadarUiState(
                 mapCamera = mapCameraPreferenceStore.restoreMapCamera(),
                 rainLayerVisible = layerPreferences.rainVisible,
-                cloudLayerVisible = layerPreferences.cloudVisible
+                cloudLayerVisible = layerPreferences.cloudVisible,
+                userLocation = userLocationPreferenceStore.restore()
             )
         }
     )
@@ -132,6 +135,9 @@ class RadarViewModel(
                 updatedCamera?.let(::persistMapCamera)
                 if (location != null && shouldCenterOnLocation) {
                     hasCenteredOnLocation = true
+                }
+                if (location != null) {
+                    userLocationPreferenceStore.save(location)
                 }
             } finally {
                 _uiState.update { it.copy(isLocationLoading = false) }
@@ -411,8 +417,10 @@ class RadarViewModel(
                     val selectedTimestamp = state.timeline.frames
                         .getOrNull(state.selectedFrameIndex)
                         ?.timestampMillis
+                    val newProgress = initialFrameLoadProgress(state.timeline, cloudTimeline)
                     state.copy(
                         cloudTimeline = cloudTimeline,
+                        frameLoadProgress = state.frameLoadProgress + newProgress,
                         selectedCloudFrame = loadedCloudFrameForSelected(
                             timestampMillis = selectedTimestamp,
                             cloudTimeline = cloudTimeline
@@ -448,7 +456,7 @@ class RadarViewModel(
                     timestampMillis = reference?.timestampMillis,
                     cloudTimeline = cloudTimeline
                 ),
-                frameLoadProgress = initialFrameLoadProgress(timeline),
+                frameLoadProgress = initialFrameLoadProgress(timeline, cloudTimeline),
                 errorMessage = null
             )
         }
@@ -577,13 +585,34 @@ class RadarViewModel(
 
     private fun scheduleSmartPrefetch(centerIndex: Int) {
         prefetchJob?.cancel()
-        val timeline = _uiState.value.timeline
+        val state = _uiState.value
+        val timeline = state.timeline
         if (timeline.frames.isEmpty()) {
             return
         }
         val plan = buildAssetPrefetchPlan(timeline, centerIndex)
         val framePlan = buildFramePrefetchPlan(timeline, centerIndex)
-        if (plan.isEmpty() && framePlan.isEmpty()) {
+
+        val cloudPlan = mutableListOf<RadarFrameReference>()
+        val cloudFramePlan = mutableListOf<RadarFrameReference>()
+        if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
+            framePlan.forEach { rainRef ->
+                closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
+                    if (loadedCloudFrameFor(cloudRef) == null && !cloudFramePlan.contains(cloudRef)) {
+                        cloudFramePlan.add(cloudRef)
+                    }
+                }
+            }
+            plan.forEach { rainRef ->
+                closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
+                    if (!radarRepository.isAssetCached(cloudRef) && !cloudPlan.contains(cloudRef)) {
+                        cloudPlan.add(cloudRef)
+                    }
+                }
+            }
+        }
+
+        if (plan.isEmpty() && framePlan.isEmpty() && cloudPlan.isEmpty() && cloudFramePlan.isEmpty()) {
             return
         }
         prefetchJob = viewModelScope.launch {
@@ -608,7 +637,45 @@ class RadarViewModel(
                     }
                 }
             }
+            cloudFramePlan.forEachIndexed { order, reference ->
+                if (order >= IMMEDIATE_PREFETCH_FRAME_COUNT) {
+                    delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
+                }
+                if (loadedCloudFrameFor(reference) != null) {
+                    return@forEachIndexed
+                }
+                runCatching {
+                    radarRepository.loadFrame(reference) { loadProgress ->
+                        markAssetProgress(reference.assetPath, loadProgress)
+                    }
+                }.onSuccess { frame ->
+                    rememberLoadedCloudFrame(frame)
+                    markAssetProgress(frame.reference.assetPath, 1f)
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) {
+                        throw throwable
+                    }
+                }
+            }
             plan.forEachIndexed { order, reference ->
+                if (order >= IMMEDIATE_PREFETCH_ASSET_COUNT) {
+                    delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
+                }
+                val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
+                if (progress >= 1f) {
+                    return@forEachIndexed
+                }
+                runCatching {
+                    radarRepository.prefetchAsset(reference) { loadProgress ->
+                        markAssetProgress(reference.assetPath, loadProgress)
+                    }
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) {
+                        throw throwable
+                    }
+                }
+            }
+            cloudPlan.forEachIndexed { order, reference ->
                 if (order >= IMMEDIATE_PREFETCH_ASSET_COUNT) {
                     delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
                 }
@@ -649,6 +716,7 @@ class RadarViewModel(
         cloudFrameJob?.cancel()
         val cachedFrame = loadedCloudFrameFor(reference)
         if (!force && cachedFrame != null) {
+            markAssetProgress(reference.assetPath, 1f)
             _uiState.update { state ->
                 val currentTimestamp = state.timeline.frames
                     .getOrNull(state.selectedFrameIndex)
@@ -664,10 +732,17 @@ class RadarViewModel(
         }
 
         cloudFrameJob = viewModelScope.launch {
+            markAssetProgress(
+                assetPath = reference.assetPath,
+                progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
+            )
             runCatching {
-                radarRepository.loadFrame(reference)
+                radarRepository.loadFrame(reference) { progress ->
+                    markAssetProgress(reference.assetPath, progress)
+                }
             }.onSuccess { frame ->
                 rememberLoadedCloudFrame(frame)
+                markAssetProgress(frame.reference.assetPath, 1f)
                 _uiState.update { state ->
                     val currentTimestamp = state.timeline.frames
                         .getOrNull(state.selectedFrameIndex)
@@ -868,13 +943,14 @@ class RadarViewModel(
         return timeStepMillis >= BROAD_FORECAST_TIMESTEP_MILLIS
     }
 
-    private fun initialFrameLoadProgress(timeline: RadarTimeline): Map<Long, Float> {
-        val progressByAsset = timeline.frames
+    private fun initialFrameLoadProgress(timeline: RadarTimeline, cloudTimeline: RadarTimeline): Map<Long, Float> {
+        val allFrames = timeline.frames + cloudTimeline.frames
+        val progressByAsset = allFrames
             .distinctBy { it.assetPath }
             .associate { reference ->
                 reference.assetPath to if (radarRepository.isAssetCached(reference)) 1f else 0f
             }
-        return timeline.frames.associate { reference ->
+        return allFrames.associate { reference ->
             reference.timestampMillis to (progressByAsset[reference.assetPath] ?: 0f)
         }
     }
@@ -882,9 +958,13 @@ class RadarViewModel(
     private fun markAssetProgress(assetPath: String, progress: Float) {
         val normalizedProgress = progress.coerceIn(0f, 1f)
         _uiState.update { state ->
-            val updates = state.timeline.frames
+            val rainUpdates = state.timeline.frames
                 .filter { it.assetPath == assetPath }
                 .associate { it.timestampMillis to normalizedProgress }
+            val cloudUpdates = state.cloudTimeline.frames
+                .filter { it.assetPath == assetPath }
+                .associate { it.timestampMillis to normalizedProgress }
+            val updates = rainUpdates + cloudUpdates
             if (updates.isEmpty()) {
                 state
             } else {
@@ -909,6 +989,7 @@ class RadarViewModel(
                 val location = locationRepository.currentLocation()
                     ?.takeIf(RadarBackend.defaultBounds::contains)
                     ?: return@launch
+                userLocationPreferenceStore.save(location)
                 var updatedCamera: MapCamera? = null
                 _uiState.update { state ->
                     if (generation != longPressLocationRefreshGeneration) {

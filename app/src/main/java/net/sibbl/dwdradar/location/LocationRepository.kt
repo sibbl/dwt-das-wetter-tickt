@@ -39,11 +39,11 @@ class LocationRepository(
 
         suspendCancellableCoroutine { continuation ->
             val provider = when {
-                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
-                    LocationManager.GPS_PROVIDER
-
                 locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
                     LocationManager.NETWORK_PROVIDER
+
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
+                    LocationManager.GPS_PROVIDER
 
                 locationManager.isProviderEnabled(LocationManager.PASSIVE_PROVIDER) ->
                     LocationManager.PASSIVE_PROVIDER
