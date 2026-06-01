@@ -30,6 +30,7 @@ data class RadarUiState(
     val layerMenuExpanded: Boolean = false,
     val layerMenuScrollDp: Float = 0f,
     val userLocation: GeoPoint? = null,
+    val isLocationLoading: Boolean = false,
     val errorMessage: String? = null
 ) {
     val zoomPreset: ZoomPreset

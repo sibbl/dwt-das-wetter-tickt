@@ -103,6 +103,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.alpha
+import androidx.compose.animation.core.keyframes
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -166,6 +168,43 @@ fun RadarScreen(
         nowMillis = uiState.timeline.nowTimestampMillis
     )
     val zoomLabelText = zoomLabel(context, uiState.zoomPreset)
+    val infiniteTransition = rememberInfiniteTransition(label = "locationLoading")
+    val alphaLeft by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 800
+                1f.at(0)
+                1f.at(399)
+                0f.at(400)
+                0f.at(799)
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "alphaLeft"
+    )
+    val alphaRight by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 800
+                0f.at(0)
+                0f.at(399)
+                1f.at(400)
+                1f.at(799)
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "alphaRight"
+    )
+
+    val overallAlpha by animateFloatAsState(
+        targetValue = if (uiState.isLocationLoading) 1f else 0f,
+        animationSpec = tween(durationMillis = 500),
+        label = "overallAlpha"
+    )
     val timelineAccent = when {
         relativeOffsetSteps < 0 -> Color(0xFFD7B3FF)
         relativeOffsetSteps > 0 -> Color(0xFF8DEEFF)
@@ -481,6 +520,32 @@ fun RadarScreen(
                         radius = mapRadius + (mapBorderWidthPx / 2f),
                         center = mapCenter,
                         style = Stroke(width = mapBorderWidthPx)
+                    )
+                }
+            }
+
+            if (overallAlpha > 0f) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 7.dp)
+                        .alpha(overallAlpha),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .alpha(alphaLeft)
+                            .background(Color.White, RoundedCornerShape(50))
+                            .border(0.8.dp, Color.Black, RoundedCornerShape(50))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .alpha(alphaRight)
+                            .background(Color.White, RoundedCornerShape(50))
+                            .border(0.8.dp, Color.Black, RoundedCornerShape(50))
                     )
                 }
             }

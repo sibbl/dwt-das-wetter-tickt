@@ -110,26 +110,31 @@ class RadarViewModel(
         if (!granted) {
             return
         }
+        _uiState.update { it.copy(isLocationLoading = true) }
         viewModelScope.launch {
-            val location = locationRepository.currentLocation()
-                ?.takeIf(RadarBackend.defaultBounds::contains)
-            val shouldCenterOnLocation = location != null && !hasCenteredOnLocation && !hasSavedMapCenter
-            var updatedCamera: MapCamera? = null
-            _uiState.update { state ->
-                val nextCamera = if (shouldCenterOnLocation) {
-                    state.mapCamera.copy(center = requireNotNull(location))
-                } else {
-                    state.mapCamera
+            try {
+                val location = locationRepository.currentLocation()
+                    ?.takeIf(RadarBackend.defaultBounds::contains)
+                val shouldCenterOnLocation = location != null && !hasCenteredOnLocation && !hasSavedMapCenter
+                var updatedCamera: MapCamera? = null
+                _uiState.update { state ->
+                    val nextCamera = if (shouldCenterOnLocation) {
+                        state.mapCamera.copy(center = requireNotNull(location))
+                    } else {
+                        state.mapCamera
+                    }
+                    updatedCamera = if (shouldCenterOnLocation) nextCamera else null
+                    state.copy(
+                        userLocation = location ?: state.userLocation,
+                        mapCamera = nextCamera
+                    )
                 }
-                updatedCamera = if (shouldCenterOnLocation) nextCamera else null
-                state.copy(
-                    userLocation = location ?: state.userLocation,
-                    mapCamera = nextCamera
-                )
-            }
-            updatedCamera?.let(::persistMapCamera)
-            if (location != null && shouldCenterOnLocation) {
-                hasCenteredOnLocation = true
+                updatedCamera?.let(::persistMapCamera)
+                if (location != null && shouldCenterOnLocation) {
+                    hasCenteredOnLocation = true
+                }
+            } finally {
+                _uiState.update { it.copy(isLocationLoading = false) }
             }
         }
     }
@@ -898,30 +903,35 @@ class RadarViewModel(
         forceCenterUntilMillis: Long
     ) {
         longPressLocationRefreshJob?.cancel()
+        _uiState.update { it.copy(isLocationLoading = true) }
         longPressLocationRefreshJob = viewModelScope.launch {
-            val location = locationRepository.currentLocation()
-                ?.takeIf(RadarBackend.defaultBounds::contains)
-                ?: return@launch
-            var updatedCamera: MapCamera? = null
-            _uiState.update { state ->
-                if (generation != longPressLocationRefreshGeneration) {
-                    return@update state
+            try {
+                val location = locationRepository.currentLocation()
+                    ?.takeIf(RadarBackend.defaultBounds::contains)
+                    ?: return@launch
+                var updatedCamera: MapCamera? = null
+                _uiState.update { state ->
+                    if (generation != longPressLocationRefreshGeneration) {
+                        return@update state
+                    }
+                    val shouldForceCenter = System.currentTimeMillis() <= forceCenterUntilMillis
+                    val nextCamera = if (shouldForceCenter) {
+                        state.mapCamera.copy(center = location)
+                    } else {
+                        state.mapCamera
+                    }
+                    updatedCamera = if (shouldForceCenter) nextCamera else null
+                    state.copy(
+                        userLocation = location,
+                        mapCamera = nextCamera
+                    )
                 }
-                val shouldForceCenter = System.currentTimeMillis() <= forceCenterUntilMillis
-                val nextCamera = if (shouldForceCenter) {
-                    state.mapCamera.copy(center = location)
-                } else {
-                    state.mapCamera
+                updatedCamera?.let { camera ->
+                    hasCenteredOnLocation = true
+                    persistMapCamera(camera)
                 }
-                updatedCamera = if (shouldForceCenter) nextCamera else null
-                state.copy(
-                    userLocation = location,
-                    mapCamera = nextCamera
-                )
-            }
-            updatedCamera?.let { camera ->
-                hasCenteredOnLocation = true
-                persistMapCamera(camera)
+            } finally {
+                _uiState.update { it.copy(isLocationLoading = false) }
             }
         }
     }
