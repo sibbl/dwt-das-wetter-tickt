@@ -14,4 +14,20 @@ enum class ZoomPreset(
             NEAR -> FAR
         }
     }
+
+    fun zoomedIn(): ZoomPreset {
+        return when (this) {
+            FAR -> MID
+            MID -> NEAR
+            NEAR -> NEAR
+        }
+    }
+
+    fun zoomedOut(): ZoomPreset {
+        return when (this) {
+            FAR -> FAR
+            MID -> FAR
+            NEAR -> MID
+        }
+    }
 }

@@ -33,6 +33,8 @@ class RadarViewModel(
     private val locationRepository = LocationRepository(application)
     private val mapCameraPreferenceStore = MapCameraPreferenceStore(application)
     private val rotaryStepAccumulator = RotaryStepAccumulator(ROTARY_TICKS_PER_STEP)
+    private val radialStepAccumulator = RotaryStepAccumulator(RADIAL_DEGREES_PER_STEP)
+    private val zoomSwipeAccumulator = RotaryStepAccumulator(ZOOM_SWIPE_PIXELS_PER_STEP)
     private val loadedFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
         MAX_LOADED_FRAMES,
         0.75f,
@@ -127,6 +129,20 @@ class RadarViewModel(
         }
     }
 
+    fun zoomBySwipe(deltaY: Float) {
+        val zoomDelta = zoomSwipeAccumulator.consume(deltaY)
+        if (zoomDelta == 0) {
+            return
+        }
+        updateMapCamera { camera ->
+            if (zoomDelta < 0) {
+                camera.copy(zoomPreset = camera.zoomPreset.zoomedIn())
+            } else {
+                camera.copy(zoomPreset = camera.zoomPreset.zoomedOut())
+            }
+        }
+    }
+
     fun resetToNowAndCenter() {
         val state = _uiState.value
         val nowIndex = state.timeline.nowFrameIndex
@@ -136,6 +152,8 @@ class RadarViewModel(
             ?: RadarBackend.defaultBounds.center
         hasCenteredOnLocation = state.userLocation != null
         rotaryStepAccumulator.reset()
+        radialStepAccumulator.reset()
+        zoomSwipeAccumulator.reset()
         val updatedCamera = state.mapCamera.copy(center = centered)
         _uiState.update {
             val reference = state.timeline.frames.getOrNull(nowIndex)
@@ -177,6 +195,23 @@ class RadarViewModel(
             return
         }
         selectIndex(_uiState.value.selectedFrameIndex + stepDelta, pausePlayback = true)
+    }
+
+    fun scrubByRadialGesture(deltaDegrees: Float) {
+        val timeline = _uiState.value.timeline
+        if (timeline.frames.isEmpty()) {
+            return
+        }
+        val stepDelta = radialStepAccumulator.consume(deltaDegrees)
+        if (stepDelta == 0) {
+            return
+        }
+        selectIndex(_uiState.value.selectedFrameIndex + stepDelta, pausePlayback = true)
+    }
+
+    fun finishGestureInput() {
+        radialStepAccumulator.reset()
+        zoomSwipeAccumulator.reset()
     }
 
     fun retry() {
@@ -590,8 +625,10 @@ class RadarViewModel(
         const val MAX_LOADED_FRAMES = 48
         const val NEXT_HOUR_PREFETCH_FRAMES = 4
         const val PREFETCH_START_DELAY_MILLIS = 150L
+        const val RADIAL_DEGREES_PER_STEP = 24f
         const val ROTARY_TICKS_PER_STEP = 0.15f
         const val TIMELINE_LOAD_ATTEMPTS = 3
         const val TIMELINE_RETRY_DELAY_MILLIS = 450L
+        const val ZOOM_SWIPE_PIXELS_PER_STEP = 42f
     }
 }

@@ -14,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +52,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalContext
@@ -75,8 +78,11 @@ import de.sibbl.dwdradar.model.RadarFrameReference
 import de.sibbl.dwdradar.model.ZoomPreset
 import de.sibbl.dwdradar.util.TimeFormatters
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 
@@ -91,6 +97,9 @@ fun RadarScreen(
     onResetToNow: () -> Unit,
     onPanMap: (Float, Float, Rect) -> Unit,
     onRotary: (Float) -> Unit,
+    onRadialScroll: (Float) -> Unit,
+    onZoomSwipe: (Float) -> Unit,
+    onGestureEnd: () -> Unit,
     onRefreshData: () -> Unit,
     onRetry: () -> Unit
 ) {
@@ -216,6 +225,8 @@ fun RadarScreen(
             )
             val rotaryScrollFactor = ViewConfiguration.get(context).scaledVerticalScrollFactor
                 .takeIf { it != 0f } ?: 1f
+            val borderTouchWidthPx = with(density) { BORDER_SCROLL_TOUCH_WIDTH_DP.dp.toPx() }
+            val zoomSwipeTouchSlopPx = with(density) { ZOOM_SWIPE_TOUCH_SLOP_DP.dp.toPx() }
 
             Box(
                 modifier = Modifier
@@ -225,6 +236,67 @@ fun RadarScreen(
                     .onRotaryScrollEvent {
                         onRotary(it.verticalScrollPixels / rotaryScrollFactor)
                         true
+                    }
+                    .pointerInput(
+                        fullWidthPx,
+                        fullHeightPx,
+                        screenRadiusPx,
+                        mapRadiusPx,
+                        borderTouchWidthPx,
+                        zoomSwipeTouchSlopPx
+                    ) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val center = Offset(fullWidthPx / 2f, fullHeightPx / 2f)
+                            val downDistance = distanceBetween(down.position, center)
+                            val isBorderGesture = downDistance >= screenRadiusPx - borderTouchWidthPx
+                            val isZoomGestureCandidate = downDistance <= mapRadiusPx * ZOOM_SWIPE_CENTER_RADIUS_FRACTION
+
+                            if (isBorderGesture) {
+                                down.consume()
+                                var lastAngle = angleDegrees(center = center, point = down.position)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) {
+                                        break
+                                    }
+                                    val angle = angleDegrees(center = center, point = change.position)
+                                    val delta = normalizedAngleDelta(angle - lastAngle)
+                                    if (abs(delta) >= MIN_RADIAL_SCROLL_DEGREES) {
+                                        onRadialScroll(delta)
+                                        lastAngle = angle
+                                    }
+                                    change.consume()
+                                }
+                                onGestureEnd()
+                            } else if (isZoomGestureCandidate) {
+                                var totalX = 0f
+                                var totalY = 0f
+                                var zoomActive = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) {
+                                        break
+                                    }
+                                    val delta = change.positionChange()
+                                    totalX += delta.x
+                                    totalY += delta.y
+                                    if (!zoomActive) {
+                                        zoomActive = abs(totalY) >= zoomSwipeTouchSlopPx &&
+                                            abs(totalY) > abs(totalX) * ZOOM_SWIPE_VERTICAL_BIAS
+                                    }
+                                    if (zoomActive) {
+                                        onZoomSwipe(delta.y)
+                                        change.consume()
+                                    }
+                                }
+                                if (zoomActive) {
+                                    onGestureEnd()
+                                }
+                            }
+                        }
                     }
                     .pointerInput(mapRect) {
                         detectDragGestures { change, dragAmount ->
@@ -912,12 +984,38 @@ private fun positiveModulo(value: Int, modulo: Int): Int {
     return ((value % modulo) + modulo) % modulo
 }
 
+private fun distanceBetween(first: Offset, second: Offset): Float {
+    val dx = first.x - second.x
+    val dy = first.y - second.y
+    return sqrt((dx * dx) + (dy * dy))
+}
+
+private fun angleDegrees(center: Offset, point: Offset): Float {
+    return (atan2(point.y - center.y, point.x - center.x) * 180f / PI.toFloat())
+}
+
+private fun normalizedAngleDelta(deltaDegrees: Float): Float {
+    var normalized = deltaDegrees
+    while (normalized > 180f) {
+        normalized -= 360f
+    }
+    while (normalized < -180f) {
+        normalized += 360f
+    }
+    return normalized
+}
+
+private const val BORDER_SCROLL_TOUCH_WIDTH_DP = 34
 private const val HOUR_MILLIS = 60 * 60 * 1000L
 private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
 private const val LOADING_RING_DURATION_MILLIS = 900
+private const val MIN_RADIAL_SCROLL_DEGREES = 0.35f
 private const val TIME_REFRESH_PULSE_MILLIS = 520L
 private const val STEPS_PER_REVOLUTION = 12
 private const val TIMELINE_SEGMENT_GAP_ANGLE = 1.2f
 private const val MAX_LAYER_SHADE_DISTANCE = 4
 private const val BROAD_FORECAST_TIMESTEP_MILLIS = 60 * 60 * 1000L
+private const val ZOOM_SWIPE_CENTER_RADIUS_FRACTION = 0.48f
+private const val ZOOM_SWIPE_TOUCH_SLOP_DP = 14
+private const val ZOOM_SWIPE_VERTICAL_BIAS = 1.45f

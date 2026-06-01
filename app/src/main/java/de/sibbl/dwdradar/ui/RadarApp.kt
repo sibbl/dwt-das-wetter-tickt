@@ -62,6 +62,9 @@ fun RadarApp(
         onResetToNow = viewModel::resetToNowAndCenter,
         onPanMap = viewModel::panMap,
         onRotary = viewModel::scrubByRotary,
+        onRadialScroll = viewModel::scrubByRadialGesture,
+        onZoomSwipe = viewModel::zoomBySwipe,
+        onGestureEnd = viewModel::finishGestureInput,
         onRefreshData = viewModel::refreshRadarData,
         onRetry = viewModel::retry
     )
