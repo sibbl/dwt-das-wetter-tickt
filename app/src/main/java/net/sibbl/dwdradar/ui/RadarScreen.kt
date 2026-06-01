@@ -528,9 +528,9 @@ fun RadarScreen(
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 7.dp)
+                        .padding(top = 12.dp)
                         .alpha(overallAlpha),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -553,7 +553,7 @@ fun RadarScreen(
             RadarGlassPill(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 16.dp)
+                    .padding(top = 21.dp)
                     .clickable {
                         timeRefreshPulseKey += 1
                         onRefreshData()
