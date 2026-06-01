@@ -183,6 +183,10 @@ class RadarViewModel(
         refreshTimeline(forceRefresh = true)
     }
 
+    fun refreshRadarData() {
+        refreshTimeline(forceRefresh = true)
+    }
+
     private fun loadOutlines() {
         viewModelScope.launch {
             val outlines = outlineRepository.loadOutlines()
@@ -388,9 +392,12 @@ class RadarViewModel(
         }
         prefetchJob = viewModelScope.launch {
             delay(PREFETCH_START_DELAY_MILLIS)
-            framePlan.forEach { reference ->
+            framePlan.forEachIndexed { order, reference ->
+                if (order >= IMMEDIATE_PREFETCH_FRAME_COUNT) {
+                    delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
+                }
                 if (loadedFrameFor(reference) != null) {
-                    return@forEach
+                    return@forEachIndexed
                 }
                 runCatching {
                     radarRepository.loadFrame(reference) { loadProgress ->
@@ -434,20 +441,22 @@ class RadarViewModel(
         val framesPerHour = (HOUR_MILLIS / centerReference.timeStepMillis.coerceAtLeast(1L))
             .toInt()
             .coerceAtLeast(1)
-        val offsets = listOf(
-            1,
-            -1,
-            framesPerHour,
-            -framesPerHour,
-            2,
-            -2,
-            framesPerHour + 1,
-            -framesPerHour - 1,
-            3,
-            -3,
-            framesPerHour + 2,
-            -framesPerHour - 2
-        )
+        val offsets = buildList {
+            add(1)
+            add(-1)
+            add(framesPerHour)
+            add(-framesPerHour)
+            add(2)
+            add(-2)
+            repeat(NEXT_HOUR_PREFETCH_FRAMES) { step ->
+                add(framesPerHour + step)
+                add(-framesPerHour - step)
+            }
+            for (step in 3 until framesPerHour) {
+                add(step)
+                add(-step)
+            }
+        }
         return offsets
             .mapNotNull { offset ->
                 val index = centerIndex + offset
@@ -572,11 +581,14 @@ class RadarViewModel(
 
     private companion object {
         const val ANIMATION_FRAME_DELAY_MILLIS = 350L
+        const val BACKGROUND_FRAME_DECODE_DELAY_MILLIS = 80L
         const val BACKGROUND_PREFETCH_DELAY_MILLIS = 900L
         const val HOUR_MILLIS = 60 * 60 * 1000L
+        const val IMMEDIATE_PREFETCH_FRAME_COUNT = 4
         const val IMMEDIATE_PREFETCH_ASSET_COUNT = 2
         const val LONG_PRESS_LOCATION_FORCE_CENTER_MILLIS = 5_000L
-        const val MAX_LOADED_FRAMES = 18
+        const val MAX_LOADED_FRAMES = 48
+        const val NEXT_HOUR_PREFETCH_FRAMES = 4
         const val PREFETCH_START_DELAY_MILLIS = 150L
         const val ROTARY_TICKS_PER_STEP = 0.15f
         const val TIMELINE_LOAD_ATTEMPTS = 3

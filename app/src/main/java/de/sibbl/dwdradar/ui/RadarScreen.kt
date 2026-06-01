@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.ViewConfiguration
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -90,6 +91,7 @@ fun RadarScreen(
     onResetToNow: () -> Unit,
     onPanMap: (Float, Float, Rect) -> Unit,
     onRotary: (Float) -> Unit,
+    onRefreshData: () -> Unit,
     onRetry: () -> Unit
 ) {
     val context = LocalContext.current
@@ -147,6 +149,11 @@ fun RadarScreen(
             repeatMode = RepeatMode.Restart
         )
     )
+    var timeRefreshPulseVisible by remember { mutableStateOf(false) }
+    var timeRefreshPulseKey by remember { mutableStateOf(0) }
+    val timeRefreshPulse by animateFloatAsState(
+        targetValue = if (timeRefreshPulseVisible || uiState.isLoading) 1f else 0f
+    )
     var showZoomLabel by remember { mutableStateOf(false) }
     var previousZoomPreset by remember { mutableStateOf<ZoomPreset?>(null) }
 
@@ -173,6 +180,15 @@ fun RadarScreen(
         showZoomLabel = true
         delay(1_000L)
         showZoomLabel = false
+    }
+
+    LaunchedEffect(timeRefreshPulseKey) {
+        if (timeRefreshPulseKey == 0) {
+            return@LaunchedEffect
+        }
+        timeRefreshPulseVisible = true
+        delay(TIME_REFRESH_PULSE_MILLIS)
+        timeRefreshPulseVisible = false
     }
 
     Surface(
@@ -345,8 +361,16 @@ fun RadarScreen(
             RadarGlassPill(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 16.dp),
-                borderColor = timelineAccent.copy(alpha = 0.14f),
+                    .padding(top = 16.dp)
+                    .clickable {
+                        timeRefreshPulseKey += 1
+                        onRefreshData()
+                    },
+                borderColor = blendColor(
+                    start = timelineAccent.copy(alpha = 0.14f),
+                    end = timelineLayerAccent.copy(alpha = 0.62f),
+                    fraction = timeRefreshPulse
+                ),
                 bottomProgress = if (showSelectedLoadProgress) selectedDisplayProgress else null,
                 bottomProgressColor = timelineLayerAccent
             ) {
@@ -721,7 +745,8 @@ private fun RadarFrameReference.isBroadForecastLayer(): Boolean {
 }
 
 private fun RadarFrameReference.visualSegmentCount(): Int {
-    return (HOUR_MILLIS / timeStepMillis.coerceAtLeast(1L))
+    val groupMillis = if (isBroadForecastLayer()) DAY_MILLIS else HOUR_MILLIS
+    return (groupMillis / timeStepMillis.coerceAtLeast(1L))
         .toInt()
         .coerceAtLeast(1)
 }
@@ -888,8 +913,10 @@ private fun positiveModulo(value: Int, modulo: Int): Int {
 }
 
 private const val HOUR_MILLIS = 60 * 60 * 1000L
+private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
 private const val LOADING_RING_DURATION_MILLIS = 900
+private const val TIME_REFRESH_PULSE_MILLIS = 520L
 private const val STEPS_PER_REVOLUTION = 12
 private const val TIMELINE_SEGMENT_GAP_ANGLE = 1.2f
 private const val MAX_LAYER_SHADE_DISTANCE = 4

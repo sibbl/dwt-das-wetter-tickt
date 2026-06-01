@@ -31,7 +31,7 @@ class RadarRepository(
 ) {
     private val overviewMutex = Mutex()
     private val assetMutex = Mutex()
-    private val bitmapCache = object : LruCache<String, Bitmap>(12) {}
+    private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_FRAMES) {}
 
     suspend fun loadTimeline(forceRefresh: Boolean = false): RadarTimeline = withContext(Dispatchers.IO) {
         val cached = if (forceRefresh) null else cache.readOverview(maxAgeMillis = OVERVIEW_CACHE_AGE_MILLIS)
@@ -246,6 +246,7 @@ class RadarRepository(
     }
 
     private companion object {
+        const val BITMAP_CACHE_FRAMES = 48
         const val OVERVIEW_CACHE_AGE_MILLIS = 5 * 60 * 1000L
     }
 }

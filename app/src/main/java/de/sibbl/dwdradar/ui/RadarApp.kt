@@ -62,6 +62,7 @@ fun RadarApp(
         onResetToNow = viewModel::resetToNowAndCenter,
         onPanMap = viewModel::panMap,
         onRotary = viewModel::scrubByRotary,
+        onRefreshData = viewModel::refreshRadarData,
         onRetry = viewModel::retry
     )
 }
@@ -76,4 +77,3 @@ private fun hasAnyLocationPermission(context: android.content.Context): Boolean 
             Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 }
-
