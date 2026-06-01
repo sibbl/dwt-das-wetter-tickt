@@ -14,8 +14,6 @@
     <string name="time_future_format">In %1$s</string>
     <string name="time_minutes_format">%1$d min</string>
     <string name="time_hours_minutes_format">%1$d h %2$d min</string>
-    <string name="zoom_near">Near</string>
-    <string name="zoom_mid">Mid</string>
-    <string name="zoom_far">Far</string>
+    <string name="zoom_kilometers_format">%1$d km</string>
     <string name="map_content_description">Interactive rain map</string>
 </resources>

@@ -1,33 +1,32 @@
 package de.sibbl.dwdradar.model
 
 enum class ZoomPreset(
-    val scaleMultiplier: Float
+    val scaleMultiplier: Float,
+    val visibleWidthKilometers: Int
 ) {
-    NEAR(7.25f),
-    MID(4.1f),
-    FAR(1.75f);
+    NEAR(8.2f, 150),
+    MID_NEAR(6.15f, 200),
+    MID(4.92f, 250),
+    MID_FAR(3.51f, 350),
+    FAR(2.46f, 500),
+    OVERVIEW(1.64f, 750);
 
     fun next(): ZoomPreset {
-        return when (this) {
-            FAR -> MID
-            MID -> NEAR
-            NEAR -> FAR
-        }
+        val currentIndex = ORDER.indexOf(this)
+        return ORDER[(currentIndex + 1) % ORDER.size]
     }
 
     fun zoomedIn(): ZoomPreset {
-        return when (this) {
-            FAR -> MID
-            MID -> NEAR
-            NEAR -> NEAR
-        }
+        val currentIndex = ORDER.indexOf(this)
+        return ORDER[(currentIndex + 1).coerceAtMost(ORDER.lastIndex)]
     }
 
     fun zoomedOut(): ZoomPreset {
-        return when (this) {
-            FAR -> FAR
-            MID -> FAR
-            NEAR -> MID
-        }
+        val currentIndex = ORDER.indexOf(this)
+        return ORDER[(currentIndex - 1).coerceAtLeast(0)]
+    }
+
+    companion object {
+        private val ORDER = listOf(OVERVIEW, FAR, MID_FAR, MID, MID_NEAR, NEAR)
     }
 }

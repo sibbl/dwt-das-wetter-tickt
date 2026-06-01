@@ -19,13 +19,17 @@ class RadarTimelineBuilder(
                 }
                     .takeWhile { timestamp -> timestamp < section.end }
                     .forEach { timestamp ->
-                        framesByTimestamp[timestamp] = RadarFrameReference(
+                        val candidate = RadarFrameReference(
                             timestampMillis = timestamp,
                             assetPath = file.file,
                             timeStepMillis = file.timeStep,
                             sectionStartMillis = section.start,
                             sectionEndMillis = section.end
                         )
+                        val existing = framesByTimestamp[timestamp]
+                        if (existing == null || candidate.timeStepMillis <= existing.timeStepMillis) {
+                            framesByTimestamp[timestamp] = candidate
+                        }
                     }
             }
 
@@ -50,4 +54,3 @@ class RadarTimelineBuilder(
         )
     }
 }
-

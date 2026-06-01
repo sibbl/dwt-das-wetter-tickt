@@ -6,7 +6,7 @@ import de.sibbl.dwdradar.model.ZoomPreset
 data class CityLabel(
     val name: String,
     val location: GeoPoint,
-    val minimumZoom: ZoomPreset = ZoomPreset.FAR
+    val minimumZoom: ZoomPreset = ZoomPreset.OVERVIEW
 )
 
 object CityCatalog {
@@ -38,11 +38,7 @@ object CityCatalog {
 
     fun visibleFor(zoomPreset: ZoomPreset): List<CityLabel> {
         return labels.filter { label ->
-            when (label.minimumZoom) {
-                ZoomPreset.FAR -> true
-                ZoomPreset.MID -> zoomPreset != ZoomPreset.FAR
-                ZoomPreset.NEAR -> zoomPreset == ZoomPreset.NEAR
-            }
+            zoomPreset.scaleMultiplier >= label.minimumZoom.scaleMultiplier
         }
     }
 }

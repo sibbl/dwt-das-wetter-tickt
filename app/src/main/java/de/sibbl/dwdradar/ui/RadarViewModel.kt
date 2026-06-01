@@ -475,31 +475,12 @@ class RadarViewModel(
         timeline: RadarTimeline,
         centerIndex: Int
     ): List<RadarFrameReference> {
-        val centerReference = timeline.frameAt(centerIndex)
-        val framesPerHour = (HOUR_MILLIS / centerReference.timeStepMillis.coerceAtLeast(1L))
-            .toInt()
-            .coerceAtLeast(1)
-        val offsets = buildList {
-            add(1)
-            add(-1)
-            add(framesPerHour)
-            add(-framesPerHour)
-            add(2)
-            add(-2)
-            repeat(NEXT_HOUR_PREFETCH_FRAMES) { step ->
-                add(framesPerHour + step)
-                add(-framesPerHour - step)
-            }
-            for (step in 3 until framesPerHour) {
-                add(step)
-                add(-step)
-            }
-        }
-        return offsets
-            .mapNotNull { offset ->
-                val index = centerIndex + offset
-                if (index in timeline.frames.indices) timeline.frameAt(index) else null
-            }
+        return buildLayerOrderedFrameReferences(
+            timeline = timeline,
+            centerIndex = centerIndex,
+            includeCenter = false
+        )
+            .take(MAX_PREFETCH_DECODE_FRAMES)
             .distinctBy { it.timestampMillis }
     }
 
@@ -507,29 +488,168 @@ class RadarViewModel(
         timeline: RadarTimeline,
         centerIndex: Int
     ): List<RadarFrameReference> {
-        val assets = timeline.frames
-            .distinctBy { it.assetPath }
-            .sortedWith(compareBy<RadarFrameReference> { it.sectionStartMillis }.thenBy { it.assetPath })
         val selectedReference = timeline.frameAt(centerIndex)
-        val selectedAssetIndex = assets.indexOfFirst { it.assetPath == selectedReference.assetPath }
-        if (selectedAssetIndex == -1) {
+        return buildLayerOrderedFrameReferences(
+            timeline = timeline,
+            centerIndex = centerIndex,
+            includeCenter = true
+        )
+            .filter { it.assetPath != selectedReference.assetPath }
+            .distinctBy { it.assetPath }
+    }
+
+    private fun buildLayerOrderedFrameReferences(
+        timeline: RadarTimeline,
+        centerIndex: Int,
+        includeCenter: Boolean
+    ): List<RadarFrameReference> {
+        if (timeline.frames.isEmpty() || centerIndex !in timeline.frames.indices) {
+            return emptyList()
+        }
+        val layers = visualTimelineLayers(timeline)
+        val selectedLayerIndex = layers.indexOfFirst { layer ->
+            centerIndex in layer.startIndex until layer.endExclusive
+        }
+        if (selectedLayerIndex == -1) {
             return emptyList()
         }
 
-        val plan = mutableListOf<RadarFrameReference>()
-        var distance = 1
-        while (plan.size < assets.size - 1) {
-            val futureIndex = selectedAssetIndex + distance
-            if (futureIndex in assets.indices) {
-                plan += assets[futureIndex]
+        return buildList {
+            addAll(layerFrameIndices(layers[selectedLayerIndex], centerIndex, includeCenter))
+            var distance = 1
+            while (size < timeline.frames.size && (selectedLayerIndex - distance >= 0 || selectedLayerIndex + distance < layers.size)) {
+                val futureLayerIndex = selectedLayerIndex + distance
+                if (futureLayerIndex < layers.size) {
+                    addAll(layerFrameIndices(layers[futureLayerIndex], centerIndex, includeCenter = true))
+                }
+                val pastLayerIndex = selectedLayerIndex - distance
+                if (pastLayerIndex >= 0) {
+                    addAll(layerFrameIndices(layers[pastLayerIndex], centerIndex, includeCenter = true))
+                }
+                distance++
             }
-            val pastIndex = selectedAssetIndex - distance
-            if (pastIndex in assets.indices) {
-                plan += assets[pastIndex]
-            }
-            distance++
         }
-        return plan
+            .filter { index -> index in timeline.frames.indices }
+            .map(timeline.frames::get)
+    }
+
+    private fun layerFrameIndices(
+        layer: VisualTimelineLayerRange,
+        centerIndex: Int,
+        includeCenter: Boolean
+    ): List<Int> {
+        if (centerIndex in layer.startIndex until layer.endExclusive) {
+            return buildList {
+                if (includeCenter) {
+                    add(centerIndex)
+                }
+                var distance = 1
+                while (centerIndex - distance >= layer.startIndex || centerIndex + distance < layer.endExclusive) {
+                    val futureIndex = centerIndex + distance
+                    if (futureIndex < layer.endExclusive) {
+                        add(futureIndex)
+                    }
+                    val pastIndex = centerIndex - distance
+                    if (pastIndex >= layer.startIndex) {
+                        add(pastIndex)
+                    }
+                    distance++
+                }
+            }
+        }
+
+        return if (layer.startIndex > centerIndex) {
+            (layer.startIndex until layer.endExclusive).toList()
+        } else {
+            (layer.endExclusive - 1 downTo layer.startIndex).toList()
+        }
+    }
+
+    private fun visualTimelineLayers(timeline: RadarTimeline): List<VisualTimelineLayerRange> {
+        val frames = timeline.frames
+        if (frames.isEmpty()) {
+            return emptyList()
+        }
+        val nowIndex = timeline.nowFrameIndex.coerceIn(frames.indices)
+        return buildList {
+            appendVisualRunPartitions(
+                frames = frames,
+                runStartIndex = 0,
+                runEndExclusive = nowIndex
+            )
+            var runStartIndex = nowIndex
+            while (runStartIndex < frames.size) {
+                val runEndExclusive = visualRunEndExclusive(runStartIndex, frames)
+                appendVisualRunPartitions(
+                    frames = frames,
+                    runStartIndex = runStartIndex,
+                    runEndExclusive = runEndExclusive
+                )
+                runStartIndex = runEndExclusive
+            }
+        }
+    }
+
+    private fun MutableList<VisualTimelineLayerRange>.appendVisualRunPartitions(
+        frames: List<RadarFrameReference>,
+        runStartIndex: Int,
+        runEndExclusive: Int
+    ) {
+        if (runStartIndex >= runEndExclusive) {
+            return
+        }
+        var subRunStartIndex = runStartIndex
+        while (subRunStartIndex < runEndExclusive) {
+            val subRunEndExclusive = visualRunEndExclusive(subRunStartIndex, frames)
+                .coerceAtMost(runEndExclusive)
+            val totalFrames = subRunEndExclusive - subRunStartIndex
+            val partitionCount = visualPartitionCount(totalFrames)
+            repeat(partitionCount) { partitionIndex ->
+                val layerStartIndex = subRunStartIndex + visualPartitionStartOffset(
+                    totalFrames = totalFrames,
+                    partitionIndex = partitionIndex
+                )
+                val layerEndExclusive = subRunStartIndex + visualPartitionStartOffset(
+                    totalFrames = totalFrames,
+                    partitionIndex = partitionIndex + 1
+                )
+                add(VisualTimelineLayerRange(layerStartIndex, layerEndExclusive))
+            }
+            subRunStartIndex = subRunEndExclusive
+        }
+    }
+
+    private fun visualRunEndExclusive(startIndex: Int, frames: List<RadarFrameReference>): Int {
+        var endExclusive = startIndex + 1
+        while (endExclusive < frames.size && frames[endExclusive].continuesVisualLayerAfter(frames[endExclusive - 1])) {
+            endExclusive++
+        }
+        return endExclusive
+    }
+
+    private fun visualPartitionCount(totalFrames: Int): Int {
+        return ((totalFrames.coerceAtLeast(1) + MAX_VISUAL_LAYER_SEGMENTS - 1) / MAX_VISUAL_LAYER_SEGMENTS)
+            .coerceAtLeast(1)
+    }
+
+    private fun visualPartitionStartOffset(totalFrames: Int, partitionIndex: Int): Int {
+        val partitionCount = visualPartitionCount(totalFrames)
+        val clampedPartitionIndex = partitionIndex.coerceIn(0, partitionCount)
+        val baseSize = totalFrames / partitionCount
+        val largerPartitionCount = totalFrames % partitionCount
+        val largerFrames = clampedPartitionIndex.coerceAtMost(largerPartitionCount) * (baseSize + 1)
+        val regularFrames = (clampedPartitionIndex - largerPartitionCount).coerceAtLeast(0) * baseSize
+        return largerFrames + regularFrames
+    }
+
+    private fun RadarFrameReference.continuesVisualLayerAfter(previous: RadarFrameReference): Boolean {
+        return timeStepMillis == previous.timeStepMillis &&
+            timestampMillis == previous.timestampMillis + previous.timeStepMillis &&
+            isBroadForecastLayer() == previous.isBroadForecastLayer()
+    }
+
+    private fun RadarFrameReference.isBroadForecastLayer(): Boolean {
+        return timeStepMillis >= BROAD_FORECAST_TIMESTEP_MILLIS
     }
 
     private fun initialFrameLoadProgress(timeline: RadarTimeline): Map<Long, Float> {
@@ -556,6 +676,11 @@ class RadarViewModel(
             }
         }
     }
+
+    private data class VisualTimelineLayerRange(
+        val startIndex: Int,
+        val endExclusive: Int
+    )
 
     private fun refreshLocationAfterLongPress(
         generation: Int,
@@ -621,13 +746,14 @@ class RadarViewModel(
         const val ANIMATION_FRAME_DELAY_MILLIS = 350L
         const val BACKGROUND_FRAME_DECODE_DELAY_MILLIS = 80L
         const val BACKGROUND_PREFETCH_DELAY_MILLIS = 900L
-        const val HOUR_MILLIS = 60 * 60 * 1000L
         const val IMMEDIATE_PREFETCH_FRAME_COUNT = 4
         const val IMMEDIATE_PREFETCH_ASSET_COUNT = 2
         const val LONG_PRESS_LOCATION_FORCE_CENTER_MILLIS = 5_000L
         const val MAX_LOADED_FRAMES = 48
-        const val NEXT_HOUR_PREFETCH_FRAMES = 4
+        const val MAX_PREFETCH_DECODE_FRAMES = MAX_LOADED_FRAMES - 1
+        const val MAX_VISUAL_LAYER_SEGMENTS = 24
         const val PREFETCH_START_DELAY_MILLIS = 150L
+        const val BROAD_FORECAST_TIMESTEP_MILLIS = 60 * 60 * 1000L
         const val RADIAL_DEGREES_PER_STEP = 24f
         const val ROTARY_TICKS_PER_STEP = 0.15f
         const val TIMELINE_LOAD_ATTEMPTS = 3

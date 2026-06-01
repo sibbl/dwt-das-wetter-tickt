@@ -642,20 +642,18 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSegmentedTimeli
     val gapAngle = TIMELINE_SEGMENT_GAP_ANGLE
     val ringBounds = Size(radius * 2f, radius * 2f)
     val topLeft = Offset(center.x - radius, center.y - radius)
-    val selectedFrame = frames.getOrNull(selectedFrameIndex)
+    val selectedLayer = visualTimelineLayer(
+        selectedFrameIndex = selectedFrameIndex,
+        nowFrameIndex = nowFrameIndex,
+        frames = frames
+    )
     val selectedDirection = selectedFrameIndex.compareTo(nowFrameIndex)
     val directionForColor = if (selectedDirection < 0) -1 else 1
-    val segmentCount = selectedFrame?.visualSegmentCount() ?: STEPS_PER_REVOLUTION
-    val relativeSteps = selectedFrameIndex - nowFrameIndex
-    val layerDistance = visualLayerDistance(relativeSteps, segmentCount)
-    val selectedSegment = visualSelectedSegment(relativeSteps, segmentCount)
-    val layerStartIndex = visualLayerStartIndex(
-        nowFrameIndex = nowFrameIndex,
-        direction = directionForColor,
-        layerDistance = layerDistance,
-        segmentCount = segmentCount
-    )
-    val selectedLayerIsBroadForecast = selectedFrame?.isBroadForecastLayer() == true
+    val segmentCount = selectedLayer?.segmentCount ?: STEPS_PER_REVOLUTION
+    val layerDistance = selectedLayer?.layerDistance ?: 0
+    val selectedSegment = selectedLayer?.selectedSegment ?: 0
+    val layerStartIndex = selectedLayer?.startIndex ?: selectedFrameIndex
+    val selectedLayerIsBroadForecast = selectedLayer?.isBroadForecast == true
     val stepAngle = 360f / segmentCount.toFloat()
     val sweepAngle = stepAngle - gapAngle
     val layerColor = layerTimelineColor(
@@ -663,20 +661,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSegmentedTimeli
         layerDistance = layerDistance,
         isBroadForecast = selectedLayerIsBroadForecast
     )
-    val previousLayerColor = if (selectedDirection == 0 || layerDistance == 0) {
+    val previousLayerColor = if (selectedDirection == 0 || layerDistance == 0 || selectedLayer == null) {
         null
     } else {
-        val carryFrameIndex = if (directionForColor > 0) {
-            layerStartIndex - 1
-        } else {
-            layerStartIndex + segmentCount
-        }
-        val carryLayerIsBroadForecast = frames.getOrNull(carryFrameIndex)?.isBroadForecastLayer()
-            ?: selectedLayerIsBroadForecast
         layerTimelineColor(
             direction = directionForColor,
             layerDistance = layerDistance - 1,
-            isBroadForecast = carryLayerIsBroadForecast
+            isBroadForecast = selectedLayer.previousLayerIsBroadForecast
         )
     }
 
@@ -726,27 +717,21 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLoadingTimeline
     progress: Float
 ) {
     val segmentCount = STEPS_PER_REVOLUTION
-    val gapAngle = TIMELINE_SEGMENT_GAP_ANGLE
     val stepAngle = 360f / segmentCount.toFloat()
-    val sweepAngle = stepAngle - gapAngle
     val ringBounds = Size(radius * 2f, radius * 2f)
     val topLeft = Offset(center.x - radius, center.y - radius)
+    val gapAngle = stepAngle * 0.92f
 
-    repeat(segmentCount) { segment ->
-        drawArc(
-            color = Color(0xFF111821).copy(alpha = 0.5f),
-            startAngle = -90f + (segment * stepAngle) + gapAngle / 2f,
-            sweepAngle = sweepAngle,
-            useCenter = false,
-            topLeft = topLeft,
-            size = ringBounds,
-            style = Stroke(width = strokeWidth)
-        )
-    }
+    drawCircle(
+        color = Color(0xFFA8F4FF).copy(alpha = 0.78f),
+        radius = radius,
+        center = center,
+        style = Stroke(width = strokeWidth)
+    )
     drawArc(
-        color = Color(0xFFA8F4FF).copy(alpha = 0.9f),
-        startAngle = -90f + (progress.coerceIn(0f, 1f) * 360f) + gapAngle / 2f,
-        sweepAngle = sweepAngle,
+        color = Color(0xFF111821).copy(alpha = 0.55f),
+        startAngle = -90f + (progress.coerceIn(0f, 1f) * 360f),
+        sweepAngle = gapAngle,
         useCenter = false,
         topLeft = topLeft,
         size = ringBounds,
@@ -780,15 +765,16 @@ private fun selectedTimelineLayerColor(
     nowFrameIndex: Int,
     frames: List<RadarFrameReference>
 ): Color {
-    val selectedFrame = frames.getOrNull(selectedFrameIndex) ?: return Color(0xFFA8F4FF)
-    val segmentCount = selectedFrame.visualSegmentCount()
-    val relativeSteps = selectedFrameIndex - nowFrameIndex
-    val layerDistance = visualLayerDistance(relativeSteps, segmentCount)
+    val layer = visualTimelineLayer(
+        selectedFrameIndex = selectedFrameIndex,
+        nowFrameIndex = nowFrameIndex,
+        frames = frames
+    ) ?: return Color(0xFFA8F4FF)
     val direction = if (selectedFrameIndex < nowFrameIndex) -1 else 1
     return layerTimelineColor(
         direction = direction,
-        layerDistance = layerDistance,
-        isBroadForecast = selectedFrame.isBroadForecastLayer()
+        layerDistance = layer.layerDistance,
+        isBroadForecast = layer.isBroadForecast
     )
 }
 
@@ -796,38 +782,234 @@ private fun RadarFrameReference.isBroadForecastLayer(): Boolean {
     return timeStepMillis >= BROAD_FORECAST_TIMESTEP_MILLIS
 }
 
-private fun RadarFrameReference.visualSegmentCount(): Int {
-    val groupMillis = if (isBroadForecastLayer()) DAY_MILLIS else HOUR_MILLIS
-    return (groupMillis / timeStepMillis.coerceAtLeast(1L))
-        .toInt()
+private data class VisualTimelineLayer(
+    val startIndex: Int,
+    val segmentCount: Int,
+    val selectedSegment: Int,
+    val layerDistance: Int,
+    val isBroadForecast: Boolean,
+    val previousLayerIsBroadForecast: Boolean
+)
+
+private fun visualTimelineLayer(
+    selectedFrameIndex: Int,
+    nowFrameIndex: Int,
+    frames: List<RadarFrameReference>
+): VisualTimelineLayer? {
+    if (frames.isEmpty() || selectedFrameIndex !in frames.indices || nowFrameIndex !in frames.indices) {
+        return null
+    }
+
+    return if (selectedFrameIndex >= nowFrameIndex) {
+        futureVisualTimelineLayer(
+            selectedFrameIndex = selectedFrameIndex,
+            nowFrameIndex = nowFrameIndex,
+            frames = frames
+        )
+    } else {
+        pastVisualTimelineLayer(
+            selectedFrameIndex = selectedFrameIndex,
+            nowFrameIndex = nowFrameIndex,
+            frames = frames
+        )
+    }
+}
+
+private fun futureVisualTimelineLayer(
+    selectedFrameIndex: Int,
+    nowFrameIndex: Int,
+    frames: List<RadarFrameReference>
+): VisualTimelineLayer {
+    var runStartIndex = nowFrameIndex
+    var layerDistance = 0
+    var previousLayerIsBroadForecast = frames[nowFrameIndex].isBroadForecastLayer()
+
+    while (runStartIndex < frames.size) {
+        val runEndExclusive = visualRunEndExclusive(runStartIndex, frames)
+        val selectedLayer = futureLayerInRun(
+            runStartIndex = runStartIndex,
+            runEndExclusive = runEndExclusive,
+            selectedFrameIndex = selectedFrameIndex,
+            layerDistanceOffset = layerDistance,
+            previousLayerIsBroadForecast = previousLayerIsBroadForecast,
+            frames = frames
+        )
+        if (selectedLayer != null) {
+            return selectedLayer
+        }
+
+        layerDistance += visualPartitionCount(runEndExclusive - runStartIndex)
+        previousLayerIsBroadForecast = frames[runStartIndex].isBroadForecastLayer()
+        runStartIndex = runEndExclusive
+    }
+
+    val fallbackIndex = selectedFrameIndex.coerceIn(frames.indices)
+    return VisualTimelineLayer(
+        startIndex = fallbackIndex,
+        segmentCount = 1,
+        selectedSegment = 0,
+        layerDistance = layerDistance,
+        isBroadForecast = frames[fallbackIndex].isBroadForecastLayer(),
+        previousLayerIsBroadForecast = previousLayerIsBroadForecast
+    )
+}
+
+private fun pastVisualTimelineLayer(
+    selectedFrameIndex: Int,
+    nowFrameIndex: Int,
+    frames: List<RadarFrameReference>
+): VisualTimelineLayer {
+    var runEndExclusive = nowFrameIndex
+    var layerDistance = 0
+    var previousLayerIsBroadForecast = frames[(nowFrameIndex - 1).coerceAtLeast(0)].isBroadForecastLayer()
+
+    while (runEndExclusive > 0) {
+        val runStartIndex = visualRunStartInclusive(runEndExclusive, frames)
+        val selectedLayer = pastLayerInRun(
+            runStartIndex = runStartIndex,
+            runEndExclusive = runEndExclusive,
+            selectedFrameIndex = selectedFrameIndex,
+            layerDistanceOffset = layerDistance,
+            previousLayerIsBroadForecast = previousLayerIsBroadForecast,
+            frames = frames
+        )
+        if (selectedLayer != null) {
+            return selectedLayer
+        }
+
+        layerDistance += visualPartitionCount(runEndExclusive - runStartIndex)
+        previousLayerIsBroadForecast = frames[(runEndExclusive - 1).coerceAtLeast(0)].isBroadForecastLayer()
+        runEndExclusive = runStartIndex
+    }
+
+    val fallbackIndex = selectedFrameIndex.coerceIn(frames.indices)
+    return VisualTimelineLayer(
+        startIndex = fallbackIndex,
+        segmentCount = 1,
+        selectedSegment = 0,
+        layerDistance = layerDistance,
+        isBroadForecast = frames[fallbackIndex].isBroadForecastLayer(),
+        previousLayerIsBroadForecast = previousLayerIsBroadForecast
+    )
+}
+
+private fun futureLayerInRun(
+    runStartIndex: Int,
+    runEndExclusive: Int,
+    selectedFrameIndex: Int,
+    layerDistanceOffset: Int,
+    previousLayerIsBroadForecast: Boolean,
+    frames: List<RadarFrameReference>
+): VisualTimelineLayer? {
+    if (selectedFrameIndex !in runStartIndex until runEndExclusive) {
+        return null
+    }
+
+    val partitionCount = visualPartitionCount(runEndExclusive - runStartIndex)
+    repeat(partitionCount) { partitionIndex ->
+        val layerStartIndex = runStartIndex + visualPartitionStartOffset(
+            totalFrames = runEndExclusive - runStartIndex,
+            partitionIndex = partitionIndex
+        )
+        val layerEndExclusive = runStartIndex + visualPartitionStartOffset(
+            totalFrames = runEndExclusive - runStartIndex,
+            partitionIndex = partitionIndex + 1
+        )
+        if (selectedFrameIndex in layerStartIndex until layerEndExclusive) {
+            return VisualTimelineLayer(
+                startIndex = layerStartIndex,
+                segmentCount = (layerEndExclusive - layerStartIndex).coerceAtLeast(1),
+                selectedSegment = selectedFrameIndex - layerStartIndex,
+                layerDistance = layerDistanceOffset + partitionIndex,
+                isBroadForecast = frames[layerStartIndex].isBroadForecastLayer(),
+                previousLayerIsBroadForecast = if (partitionIndex > 0) {
+                    frames[layerStartIndex].isBroadForecastLayer()
+                } else {
+                    previousLayerIsBroadForecast
+                }
+            )
+        }
+    }
+    return null
+}
+
+private fun pastLayerInRun(
+    runStartIndex: Int,
+    runEndExclusive: Int,
+    selectedFrameIndex: Int,
+    layerDistanceOffset: Int,
+    previousLayerIsBroadForecast: Boolean,
+    frames: List<RadarFrameReference>
+): VisualTimelineLayer? {
+    if (selectedFrameIndex !in runStartIndex until runEndExclusive) {
+        return null
+    }
+
+    val totalFrames = runEndExclusive - runStartIndex
+    val partitionCount = visualPartitionCount(totalFrames)
+    for (partitionIndex in partitionCount - 1 downTo 0) {
+        val layerStartIndex = runStartIndex + visualPartitionStartOffset(
+            totalFrames = totalFrames,
+            partitionIndex = partitionIndex
+        )
+        val layerEndExclusive = runStartIndex + visualPartitionStartOffset(
+            totalFrames = totalFrames,
+            partitionIndex = partitionIndex + 1
+        )
+        if (selectedFrameIndex in layerStartIndex until layerEndExclusive) {
+            val layerDistance = layerDistanceOffset + ((partitionCount - 1) - partitionIndex)
+            return VisualTimelineLayer(
+                startIndex = layerStartIndex,
+                segmentCount = (layerEndExclusive - layerStartIndex).coerceAtLeast(1),
+                selectedSegment = selectedFrameIndex - layerStartIndex,
+                layerDistance = layerDistance,
+                isBroadForecast = frames[layerStartIndex].isBroadForecastLayer(),
+                previousLayerIsBroadForecast = if (partitionIndex < partitionCount - 1) {
+                    frames[layerStartIndex].isBroadForecastLayer()
+                } else {
+                    previousLayerIsBroadForecast
+                }
+            )
+        }
+    }
+    return null
+}
+
+private fun visualRunEndExclusive(startIndex: Int, frames: List<RadarFrameReference>): Int {
+    var endExclusive = startIndex + 1
+    while (endExclusive < frames.size && frames[endExclusive].continuesVisualLayerAfter(frames[endExclusive - 1])) {
+        endExclusive += 1
+    }
+    return endExclusive
+}
+
+private fun visualRunStartInclusive(endExclusive: Int, frames: List<RadarFrameReference>): Int {
+    var startIndex = endExclusive - 1
+    while (startIndex > 0 && frames[startIndex].continuesVisualLayerAfter(frames[startIndex - 1])) {
+        startIndex -= 1
+    }
+    return startIndex
+}
+
+private fun visualPartitionCount(totalFrames: Int): Int {
+    return ((totalFrames.coerceAtLeast(1) + MAX_VISUAL_LAYER_SEGMENTS - 1) / MAX_VISUAL_LAYER_SEGMENTS)
         .coerceAtLeast(1)
 }
 
-private fun visualSelectedSegment(relativeSteps: Int, segmentCount: Int): Int {
-    return positiveModulo(relativeSteps, segmentCount.coerceAtLeast(1))
+private fun visualPartitionStartOffset(totalFrames: Int, partitionIndex: Int): Int {
+    val partitionCount = visualPartitionCount(totalFrames)
+    val clampedPartitionIndex = partitionIndex.coerceIn(0, partitionCount)
+    val baseSize = totalFrames / partitionCount
+    val largerPartitionCount = totalFrames % partitionCount
+    val largerFrames = clampedPartitionIndex.coerceAtMost(largerPartitionCount) * (baseSize + 1)
+    val regularFrames = (clampedPartitionIndex - largerPartitionCount).coerceAtLeast(0) * baseSize
+    return largerFrames + regularFrames
 }
 
-private fun visualLayerDistance(relativeSteps: Int, segmentCount: Int): Int {
-    val normalizedSegmentCount = segmentCount.coerceAtLeast(1)
-    return if (relativeSteps >= 0) {
-        relativeSteps / normalizedSegmentCount
-    } else {
-        ((-relativeSteps) - 1) / normalizedSegmentCount
-    }
-}
-
-private fun visualLayerStartIndex(
-    nowFrameIndex: Int,
-    direction: Int,
-    layerDistance: Int,
-    segmentCount: Int
-): Int {
-    val normalizedSegmentCount = segmentCount.coerceAtLeast(1)
-    return if (direction < 0) {
-        nowFrameIndex - ((layerDistance + 1) * normalizedSegmentCount)
-    } else {
-        nowFrameIndex + (layerDistance * normalizedSegmentCount)
-    }
+private fun RadarFrameReference.continuesVisualLayerAfter(previous: RadarFrameReference): Boolean {
+    return timeStepMillis == previous.timeStepMillis &&
+        timestampMillis == previous.timestampMillis + previous.timeStepMillis &&
+        isBroadForecastLayer() == previous.isBroadForecastLayer()
 }
 
 private fun blendColor(start: Color, end: Color, fraction: Float): Color {
@@ -943,11 +1125,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCityLabels(
 }
 
 private fun zoomLabel(context: android.content.Context, zoomPreset: ZoomPreset): String {
-    return when (zoomPreset) {
-        ZoomPreset.NEAR -> context.getString(R.string.zoom_near)
-        ZoomPreset.MID -> context.getString(R.string.zoom_mid)
-        ZoomPreset.FAR -> context.getString(R.string.zoom_far)
-    }
+    return context.getString(R.string.zoom_kilometers_format, zoomPreset.visibleWidthKilometers)
 }
 
 private fun compactErrorDetails(errorMessage: String?): String {
@@ -958,10 +1136,6 @@ private fun compactErrorDetails(errorMessage: String?): String {
         .orEmpty()
         .ifBlank { "Unbekannter Fehler" }
     return "Details: $compactMessage"
-}
-
-private fun positiveModulo(value: Int, modulo: Int): Int {
-    return ((value % modulo) + modulo) % modulo
 }
 
 private sealed class FirstTouchResult {
@@ -1159,8 +1333,6 @@ private const val BORDER_SCROLL_TOUCH_WIDTH_DP = 34
 private const val DOUBLE_TAP_DRAG_SAME_POINT_DP = 28
 private const val DOUBLE_TAP_DRAG_TIMEOUT_MILLIS = 320L
 private const val GESTURE_LONG_PRESS_TIMEOUT_MILLIS = 520L
-private const val HOUR_MILLIS = 60 * 60 * 1000L
-private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
 private const val LOADING_RING_DURATION_MILLIS = 900
 private const val MIN_RADIAL_SCROLL_DEGREES = 0.35f
@@ -1168,6 +1340,7 @@ private const val TIME_REFRESH_PULSE_MILLIS = 520L
 private const val STEPS_PER_REVOLUTION = 12
 private const val TIMELINE_SEGMENT_GAP_ANGLE = 1.2f
 private const val MAX_LAYER_SHADE_DISTANCE = 4
+private const val MAX_VISUAL_LAYER_SEGMENTS = 24
 private const val BROAD_FORECAST_TIMESTEP_MILLIS = 60 * 60 * 1000L
 private const val PAN_TOUCH_SLOP_DP = 10
 private const val ZOOM_SWIPE_TOUCH_SLOP_DP = 14
