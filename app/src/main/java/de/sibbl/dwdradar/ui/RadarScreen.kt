@@ -16,8 +16,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -54,6 +52,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
@@ -230,6 +229,8 @@ fun RadarScreen(
                 .takeIf { it != 0f } ?: 1f
             val borderTouchWidthPx = with(density) { BORDER_SCROLL_TOUCH_WIDTH_DP.dp.toPx() }
             val zoomSwipeTouchSlopPx = with(density) { ZOOM_SWIPE_TOUCH_SLOP_DP.dp.toPx() }
+            val panTouchSlopPx = with(density) { PAN_TOUCH_SLOP_DP.dp.toPx() }
+            val doubleTapSamePointPx = with(density) { DOUBLE_TAP_DRAG_SAME_POINT_DP.dp.toPx() }
 
             Box(
                 modifier = Modifier
@@ -246,86 +247,49 @@ fun RadarScreen(
                         screenRadiusPx,
                         mapRadiusPx,
                         borderTouchWidthPx,
-                        zoomSwipeTouchSlopPx
+                        zoomSwipeTouchSlopPx,
+                        panTouchSlopPx,
+                        doubleTapSamePointPx,
+                        mapRect
                     ) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             val center = Offset(fullWidthPx / 2f, fullHeightPx / 2f)
                             val downDistance = distanceBetween(down.position, center)
                             val isBorderGesture = downDistance >= screenRadiusPx - borderTouchWidthPx
-                            val isZoomGestureCandidate = downDistance <= mapRadiusPx * ZOOM_SWIPE_CENTER_RADIUS_FRACTION
 
                             if (isBorderGesture) {
-                                down.consume()
-                                var lastAngle = angleDegrees(center = center, point = down.position)
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    if (!change.pressed) {
-                                        break
-                                    }
-                                    val angle = angleDegrees(center = center, point = change.position)
-                                    val delta = normalizedAngleDelta(angle - lastAngle)
-                                    if (abs(delta) >= MIN_RADIAL_SCROLL_DEGREES) {
-                                        onRadialScroll(delta)
-                                        lastAngle = angle
-                                    }
-                                    change.consume()
-                                }
-                                onGestureEnd()
-                            } else if (isZoomGestureCandidate) {
-                                val firstUpPosition = waitForPointerUpPosition(down.id) ?: return@awaitEachGesture
-                                val secondDown = withTimeoutOrNull(DOUBLE_TAP_DRAG_TIMEOUT_MILLIS) {
-                                    awaitFirstDown(requireUnconsumed = false)
-                                } ?: return@awaitEachGesture
-                                val secondDownDistance = distanceBetween(secondDown.position, firstUpPosition)
-                                if (secondDownDistance > DOUBLE_TAP_DRAG_SAME_POINT_DP.dp.toPx()) {
-                                    return@awaitEachGesture
-                                }
+                                handleBorderScrollGesture(
+                                    down = down,
+                                    center = center,
+                                    onRadialScroll = onRadialScroll,
+                                    onGestureEnd = onGestureEnd
+                                )
+                                return@awaitEachGesture
+                            }
 
-                                secondDown.consume()
-                                var totalX = 0f
-                                var totalY = 0f
-                                var zoomActive = false
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == secondDown.id } ?: break
-                                    if (!change.pressed) {
-                                        if (zoomActive) {
-                                            change.consume()
-                                        }
-                                        break
-                                    }
-                                    val delta = change.positionChange()
-                                    totalX += delta.x
-                                    totalY += delta.y
-                                    if (!zoomActive) {
-                                        zoomActive = abs(totalY) >= zoomSwipeTouchSlopPx &&
-                                            abs(totalY) > abs(totalX) * ZOOM_SWIPE_VERTICAL_BIAS
-                                    }
-                                    if (zoomActive) {
-                                        onZoomSwipe(delta.y)
-                                        change.consume()
-                                    }
-                                }
-                                if (zoomActive) {
-                                    onGestureEnd()
-                                }
+                            when (
+                                val firstTouch = awaitFirstTouchResult(
+                                    down = down,
+                                    mapRect = mapRect,
+                                    panTouchSlopPx = panTouchSlopPx,
+                                    onPanMap = onPanMap,
+                                    onLongPress = onResetToNow
+                                )
+                            ) {
+                                FirstTouchResult.Canceled,
+                                FirstTouchResult.Handled -> return@awaitEachGesture
+                                is FirstTouchResult.Tap -> handleTapOrZoomGesture(
+                                    firstUpPosition = firstTouch.upPosition,
+                                    doubleTapSamePointPx = doubleTapSamePointPx,
+                                    zoomSwipeTouchSlopPx = zoomSwipeTouchSlopPx,
+                                    onSingleTap = onTogglePlayback,
+                                    onDoubleTap = onCycleZoom,
+                                    onZoomSwipe = onZoomSwipe,
+                                    onGestureEnd = onGestureEnd
+                                )
                             }
                         }
-                    }
-                    .pointerInput(mapRect) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            onPanMap(dragAmount.x, dragAmount.y, mapRect)
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onTogglePlayback() },
-                            onDoubleTap = { onCycleZoom() },
-                            onLongPress = { onResetToNow() }
-                        )
                     }
                     .semantics {
                         contentDescription = context.getString(R.string.map_content_description)
@@ -1000,13 +964,173 @@ private fun positiveModulo(value: Int, modulo: Int): Int {
     return ((value % modulo) + modulo) % modulo
 }
 
-private suspend fun AwaitPointerEventScope.waitForPointerUpPosition(pointerId: PointerId): Offset? {
+private sealed class FirstTouchResult {
+    data class Tap(val upPosition: Offset) : FirstTouchResult()
+    object Handled : FirstTouchResult()
+    object Canceled : FirstTouchResult()
+}
+
+private suspend fun AwaitPointerEventScope.handleBorderScrollGesture(
+    down: PointerInputChange,
+    center: Offset,
+    onRadialScroll: (Float) -> Unit,
+    onGestureEnd: () -> Unit
+) {
+    down.consume()
+    var lastAngle = angleDegrees(center = center, point = down.position)
     while (true) {
         val event = awaitPointerEvent()
-        val change = event.changes.firstOrNull { it.id == pointerId } ?: return null
+        val change = event.changes.firstOrNull { it.id == down.id } ?: break
         if (!change.pressed) {
-            return change.position
+            change.consume()
+            break
         }
+        val angle = angleDegrees(center = center, point = change.position)
+        val delta = normalizedAngleDelta(angle - lastAngle)
+        if (abs(delta) >= MIN_RADIAL_SCROLL_DEGREES) {
+            onRadialScroll(delta)
+            lastAngle = angle
+        }
+        change.consume()
+    }
+    onGestureEnd()
+}
+
+private suspend fun AwaitPointerEventScope.awaitFirstTouchResult(
+    down: PointerInputChange,
+    mapRect: Rect,
+    panTouchSlopPx: Float,
+    onPanMap: (Float, Float, Rect) -> Unit,
+    onLongPress: () -> Unit
+): FirstTouchResult {
+    val longPressAtMillis = down.uptimeMillis + GESTURE_LONG_PRESS_TIMEOUT_MILLIS
+    var lastEventMillis = down.uptimeMillis
+
+    while (true) {
+        val millisUntilLongPress = (longPressAtMillis - lastEventMillis).coerceAtLeast(1L)
+        val event = withTimeoutOrNull(millisUntilLongPress) { awaitPointerEvent() }
+        if (event == null) {
+            onLongPress()
+            consumePointerUntilUp(down.id)
+            return FirstTouchResult.Handled
+        }
+
+        val change = event.changes.firstOrNull { it.id == down.id } ?: return FirstTouchResult.Canceled
+        lastEventMillis = change.uptimeMillis
+
+        if (!change.pressed) {
+            return FirstTouchResult.Tap(change.position)
+        }
+
+        if (distanceBetween(change.position, down.position) >= panTouchSlopPx) {
+            val delta = change.positionChange()
+            change.consume()
+            onPanMap(delta.x, delta.y, mapRect)
+            consumePanGesture(pointerId = down.id, mapRect = mapRect, onPanMap = onPanMap)
+            return FirstTouchResult.Handled
+        }
+    }
+}
+
+private suspend fun AwaitPointerEventScope.handleTapOrZoomGesture(
+    firstUpPosition: Offset,
+    doubleTapSamePointPx: Float,
+    zoomSwipeTouchSlopPx: Float,
+    onSingleTap: () -> Unit,
+    onDoubleTap: () -> Unit,
+    onZoomSwipe: (Float) -> Unit,
+    onGestureEnd: () -> Unit
+) {
+    val secondDown = withTimeoutOrNull(DOUBLE_TAP_DRAG_TIMEOUT_MILLIS) {
+        awaitFirstDown(requireUnconsumed = false)
+    }
+
+    if (secondDown == null) {
+        onSingleTap()
+        return
+    }
+
+    if (distanceBetween(secondDown.position, firstUpPosition) > doubleTapSamePointPx) {
+        onSingleTap()
+        consumePointerUntilUp(secondDown.id)
+        return
+    }
+
+    secondDown.consume()
+    var totalX = 0f
+    var totalY = 0f
+    var zoomActive = false
+
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == secondDown.id } ?: break
+
+        if (!change.pressed) {
+            change.consume()
+            if (zoomActive) {
+                onGestureEnd()
+            } else {
+                onDoubleTap()
+            }
+            return
+        }
+
+        val delta = change.positionChange()
+        totalX += delta.x
+        totalY += delta.y
+
+        if (!zoomActive) {
+            val verticalDragStarted = abs(totalY) >= zoomSwipeTouchSlopPx &&
+                abs(totalY) > abs(totalX) * ZOOM_SWIPE_VERTICAL_BIAS
+            val nonZoomDragStarted = distanceBetween(Offset(totalX, totalY), Offset.Zero) >= zoomSwipeTouchSlopPx &&
+                !verticalDragStarted
+
+            when {
+                verticalDragStarted -> zoomActive = true
+                nonZoomDragStarted -> {
+                    change.consume()
+                    consumePointerUntilUp(secondDown.id)
+                    return
+                }
+            }
+        }
+
+        if (zoomActive) {
+            onZoomSwipe(delta.y)
+            change.consume()
+        }
+    }
+}
+
+private suspend fun AwaitPointerEventScope.consumePanGesture(
+    pointerId: PointerId,
+    mapRect: Rect,
+    onPanMap: (Float, Float, Rect) -> Unit
+) {
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: return
+        if (!change.pressed) {
+            change.consume()
+            return
+        }
+        val delta = change.positionChange()
+        if (delta != Offset.Zero) {
+            onPanMap(delta.x, delta.y, mapRect)
+        }
+        change.consume()
+    }
+}
+
+private suspend fun AwaitPointerEventScope.consumePointerUntilUp(pointerId: PointerId) {
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: return
+        if (!change.pressed) {
+            change.consume()
+            return
+        }
+        change.consume()
     }
 }
 
@@ -1034,6 +1158,7 @@ private fun normalizedAngleDelta(deltaDegrees: Float): Float {
 private const val BORDER_SCROLL_TOUCH_WIDTH_DP = 34
 private const val DOUBLE_TAP_DRAG_SAME_POINT_DP = 28
 private const val DOUBLE_TAP_DRAG_TIMEOUT_MILLIS = 320L
+private const val GESTURE_LONG_PRESS_TIMEOUT_MILLIS = 520L
 private const val HOUR_MILLIS = 60 * 60 * 1000L
 private const val DAY_MILLIS = 24 * HOUR_MILLIS
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
@@ -1044,6 +1169,6 @@ private const val STEPS_PER_REVOLUTION = 12
 private const val TIMELINE_SEGMENT_GAP_ANGLE = 1.2f
 private const val MAX_LAYER_SHADE_DISTANCE = 4
 private const val BROAD_FORECAST_TIMESTEP_MILLIS = 60 * 60 * 1000L
-private const val ZOOM_SWIPE_CENTER_RADIUS_FRACTION = 0.48f
+private const val PAN_TOUCH_SLOP_DP = 10
 private const val ZOOM_SWIPE_TOUCH_SLOP_DP = 14
 private const val ZOOM_SWIPE_VERTICAL_BIAS = 1.45f
