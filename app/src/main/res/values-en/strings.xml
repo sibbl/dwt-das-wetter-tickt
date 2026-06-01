@@ -2,7 +2,7 @@
     <string name="app_name">DWD Regenradar</string>
     <string name="permission_location_title">Allow location</string>
     <string name="permission_location_body">The radar always starts on your current location.</string>
-    <string name="permission_location_action">Allow location</string>
+    <string name="permission_location_action">Settings</string>
     <string name="permission_location_skip">Continue without location</string>
     <string name="loading">Loading radar…</string>
     <string name="error_loading_radar">Could not load radar.</string>

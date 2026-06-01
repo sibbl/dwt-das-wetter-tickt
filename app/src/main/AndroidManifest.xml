@@ -35,6 +35,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DwdRadarWear" />
+
         <service
             android:name=".tile.RadarTileService"
             android:exported="true"

@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "de.sibbl.dwdradar"
+    namespace = "net.sibbl.dwdradar"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "de.sibbl.dwdradar"
+        applicationId = "net.sibbl.dwdradar"
         minSdk = 30
         targetSdk = 35
         versionCode = 1
@@ -71,6 +71,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-process:2.8.4")

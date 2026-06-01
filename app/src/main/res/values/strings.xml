@@ -2,7 +2,7 @@
     <string name="app_name">DWD Regenradar</string>
     <string name="permission_location_title">Standort erlauben</string>
     <string name="permission_location_body">Der Radar startet immer auf deinem aktuellen Standort.</string>
-    <string name="permission_location_action">Standort freigeben</string>
+    <string name="permission_location_action">Einstellungen</string>
     <string name="permission_location_skip">Ohne Standort fortfahren</string>
     <string name="loading">Radar wird geladen…</string>
     <string name="error_loading_radar">Radar konnte nicht geladen werden.</string>
@@ -16,4 +16,12 @@
     <string name="time_hours_minutes_format">%1$d h %2$d min</string>
     <string name="zoom_kilometers_format">%1$d km</string>
     <string name="map_content_description">Interaktive Regenkarte</string>
+    <string name="layer_rain">Regen</string>
+    <string name="layer_clouds">Wolken</string>
+    <string name="about">Info</string>
+    <string name="about_version_format">Version %1$s</string>
+    <string name="about_made_by">Made by sibbl</string>
+    <string name="about_github">GitHub: repo folgt</string>
+    <string name="about_data_source">Datenquelle: Deutscher Wetterdienst (DWD), WarnWetter Karten- und Animationsdaten.</string>
+    <string name="close">Schließen</string>
 </resources>
