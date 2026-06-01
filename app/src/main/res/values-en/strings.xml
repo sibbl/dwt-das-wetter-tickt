@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">DWD Regenradar</string>
+    <string name="permission_location_title">Allow location</string>
+    <string name="permission_location_body">The radar always starts on your current location.</string>
+    <string name="permission_location_action">Allow location</string>
+    <string name="permission_location_skip">Continue without location</string>
+    <string name="loading">Loading radar…</string>
+    <string name="error_loading_radar">Could not load radar.</string>
+    <string name="retry">Retry</string>
+    <string name="playback_running">Animation running</string>
+    <string name="playback_paused">Animation paused</string>
+    <string name="time_now">Now</string>
+    <string name="time_past_format">%1$s ago</string>
+    <string name="time_future_format">In %1$s</string>
+    <string name="time_minutes_format">%1$d min</string>
+    <string name="time_hours_minutes_format">%1$d h %2$d min</string>
+    <string name="zoom_near">Near</string>
+    <string name="zoom_mid">Mid</string>
+    <string name="zoom_far">Far</string>
+    <string name="map_content_description">Interactive rain map</string>
+</resources>
