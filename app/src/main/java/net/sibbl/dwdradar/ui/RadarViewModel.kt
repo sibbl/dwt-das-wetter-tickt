@@ -39,13 +39,18 @@ class RadarViewModel(
     private val rotaryStepAccumulator = RotaryStepAccumulator(ROTARY_TICKS_PER_STEP)
     private val radialStepAccumulator = RotaryStepAccumulator(RADIAL_DEGREES_PER_STEP)
     private val zoomSwipeAccumulator = RotaryStepAccumulator(ZOOM_SWIPE_PIXELS_PER_STEP)
+    @Volatile
+    private var maxLoadedFrames = MAX_LOADED_FRAMES
+    @Volatile
+    private var maxLoadedCloudFrames = MAX_LOADED_CLOUD_FRAMES
+
     private val loadedFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
         MAX_LOADED_FRAMES,
         0.75f,
         true
     ) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, RadarBitmapFrame>?): Boolean {
-            return size > MAX_LOADED_FRAMES
+            return size > maxLoadedFrames
         }
     }
     private val loadedCloudFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
@@ -54,7 +59,7 @@ class RadarViewModel(
         true
     ) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, RadarBitmapFrame>?): Boolean {
-            return size > MAX_LOADED_CLOUD_FRAMES
+            return size > maxLoadedCloudFrames
         }
     }
 
@@ -104,6 +109,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
+        updateCacheCapacities()
         loadFrameAt(timeline.nowFrameIndex, force = true)
         loadCloudFrameForSelected(force = true)
         scheduleSmartPrefetch(timeline.nowFrameIndex)
@@ -236,6 +242,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
+        updateCacheCapacities()
         persistMapCamera(updatedCamera)
         loadFrameAt(nowIndex, force = true)
         loadCloudFrameForSelected(force = true)
@@ -427,6 +434,7 @@ class RadarViewModel(
                         )
                     )
                 }
+                updateCacheCapacities()
                 loadCloudFrameForSelected(force = true)
             }
         }
@@ -460,6 +468,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
+        updateCacheCapacities()
         loadFrameAt(preservedIndex)
         loadCloudFrameForSelected()
         scheduleSmartPrefetch(preservedIndex)
@@ -508,6 +517,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
+        updateCacheCapacities()
         loadFrameAt(clampedIndex)
         loadCloudFrameForSelected()
         if (pausePlayback) {
@@ -590,106 +600,146 @@ class RadarViewModel(
         if (timeline.frames.isEmpty()) {
             return
         }
-        val plan = buildAssetPrefetchPlan(timeline, centerIndex)
-        val framePlan = buildFramePrefetchPlan(timeline, centerIndex)
-
-        val cloudPlan = mutableListOf<RadarFrameReference>()
-        val cloudFramePlan = mutableListOf<RadarFrameReference>()
-        if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
-            framePlan.forEach { rainRef ->
-                closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
-                    if (loadedCloudFrameFor(cloudRef) == null && !cloudFramePlan.contains(cloudRef)) {
-                        cloudFramePlan.add(cloudRef)
-                    }
-                }
-            }
-            plan.forEach { rainRef ->
-                closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
-                    if (!radarRepository.isAssetCached(cloudRef) && !cloudPlan.contains(cloudRef)) {
-                        cloudPlan.add(cloudRef)
-                    }
-                }
-            }
+        val layers = visualTimelineLayers(timeline)
+        val selectedLayerIndex = layers.indexOfFirst { layer ->
+            centerIndex in layer.startIndex until layer.endExclusive
         }
-
-        if (plan.isEmpty() && framePlan.isEmpty() && cloudPlan.isEmpty() && cloudFramePlan.isEmpty()) {
+        if (selectedLayerIndex == -1) {
             return
         }
+
+        val currentLayer = layers[selectedLayerIndex]
+        val currentFrames = timeline.frames.subList(
+            currentLayer.startIndex.coerceIn(timeline.frames.indices),
+            currentLayer.endExclusive.coerceIn(0, timeline.frames.size)
+        )
+        val prevFrames = if (selectedLayerIndex - 1 >= 0) {
+            val prevLayer = layers[selectedLayerIndex - 1]
+            timeline.frames.subList(
+                prevLayer.startIndex.coerceIn(timeline.frames.indices),
+                prevLayer.endExclusive.coerceIn(0, timeline.frames.size)
+            )
+        } else {
+            emptyList()
+        }
+        val next1Frames = if (selectedLayerIndex + 1 < layers.size) {
+            val nextLayer = layers[selectedLayerIndex + 1]
+            timeline.frames.subList(
+                nextLayer.startIndex.coerceIn(timeline.frames.indices),
+                nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
+            )
+        } else {
+            emptyList()
+        }
+        val next2Frames = if (selectedLayerIndex + 2 < layers.size) {
+            val nextLayer = layers[selectedLayerIndex + 2]
+            timeline.frames.subList(
+                nextLayer.startIndex.coerceIn(timeline.frames.indices),
+                nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
+            )
+        } else {
+            emptyList()
+        }
+
+        val primaryRainFrames = (currentFrames + prevFrames).distinctBy { it.timestampMillis }
+        val secondaryRainFrames = (next1Frames + next2Frames).distinctBy { it.timestampMillis }
+
         prefetchJob = viewModelScope.launch {
             delay(PREFETCH_START_DELAY_MILLIS)
-            framePlan.forEachIndexed { order, reference ->
-                if (order >= IMMEDIATE_PREFETCH_FRAME_COUNT) {
-                    delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
-                }
-                if (loadedFrameFor(reference) != null) {
-                    return@forEachIndexed
-                }
-                runCatching {
-                    radarRepository.loadFrame(reference) { loadProgress ->
-                        markAssetProgress(reference.assetPath, loadProgress)
-                    }
-                }.onSuccess { frame ->
-                    rememberLoadedFrame(frame)
-                    markAssetProgress(frame.reference.assetPath, 1f)
-                }.onFailure { throwable ->
-                    if (throwable is CancellationException) {
-                        throw throwable
+
+            // --- PHASE 1: Load primary layers (Current + Prev) ---
+            primaryRainFrames.forEach { reference ->
+                if (loadedFrameFor(reference) == null) {
+                    runCatching {
+                        radarRepository.loadFrame(reference) { loadProgress ->
+                            markAssetProgress(reference.assetPath, loadProgress)
+                        }
+                    }.onSuccess { frame ->
+                        rememberLoadedFrame(frame)
+                        markAssetProgress(frame.reference.assetPath, 1f)
                     }
                 }
             }
-            cloudFramePlan.forEachIndexed { order, reference ->
-                if (order >= IMMEDIATE_PREFETCH_FRAME_COUNT) {
-                    delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
-                }
-                if (loadedCloudFrameFor(reference) != null) {
-                    return@forEachIndexed
-                }
-                runCatching {
-                    radarRepository.loadFrame(reference) { loadProgress ->
-                        markAssetProgress(reference.assetPath, loadProgress)
-                    }
-                }.onSuccess { frame ->
-                    rememberLoadedCloudFrame(frame)
-                    markAssetProgress(frame.reference.assetPath, 1f)
-                }.onFailure { throwable ->
-                    if (throwable is CancellationException) {
-                        throw throwable
+
+            if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
+                primaryRainFrames.forEach { rainRef ->
+                    closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
+                        if (loadedCloudFrameFor(cloudRef) == null) {
+                            runCatching {
+                                radarRepository.loadFrame(cloudRef) { loadProgress ->
+                                    markAssetProgress(cloudRef.assetPath, loadProgress)
+                                }
+                            }.onSuccess { frame ->
+                                rememberLoadedCloudFrame(frame)
+                                markAssetProgress(frame.reference.assetPath, 1f)
+                            }
+                        }
                     }
                 }
             }
-            plan.forEachIndexed { order, reference ->
-                if (order >= IMMEDIATE_PREFETCH_ASSET_COUNT) {
-                    delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
+
+            // --- PHASE 2: Load secondary layers (Next 1 + Next 2) ---
+            secondaryRainFrames.forEach { reference ->
+                delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
+                if (loadedFrameFor(reference) == null) {
+                    runCatching {
+                        radarRepository.loadFrame(reference) { loadProgress ->
+                            markAssetProgress(reference.assetPath, loadProgress)
+                        }
+                    }.onSuccess { frame ->
+                        rememberLoadedFrame(frame)
+                        markAssetProgress(frame.reference.assetPath, 1f)
+                    }
                 }
+            }
+
+            if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
+                secondaryRainFrames.forEach { rainRef ->
+                    closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
+                        delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
+                        if (loadedCloudFrameFor(cloudRef) == null) {
+                            runCatching {
+                                radarRepository.loadFrame(cloudRef) { loadProgress ->
+                                    markAssetProgress(cloudRef.assetPath, loadProgress)
+                                }
+                            }.onSuccess { frame ->
+                                rememberLoadedCloudFrame(frame)
+                                markAssetProgress(frame.reference.assetPath, 1f)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- PHASE 3: Prefetch remaining assets beyond ---
+            val allOtherRainRefs = timeline.frames.filter { ref ->
+                ref !in primaryRainFrames && ref !in secondaryRainFrames
+            }
+            allOtherRainRefs.forEach { reference ->
+                delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
                 val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
-                if (progress >= 1f) {
-                    return@forEachIndexed
-                }
-                runCatching {
-                    radarRepository.prefetchAsset(reference) { loadProgress ->
-                        markAssetProgress(reference.assetPath, loadProgress)
-                    }
-                }.onFailure { throwable ->
-                    if (throwable is CancellationException) {
-                        throw throwable
+                if (progress < 1f) {
+                    runCatching {
+                        radarRepository.prefetchAsset(reference) { loadProgress ->
+                            markAssetProgress(reference.assetPath, loadProgress)
+                        }
                     }
                 }
             }
-            cloudPlan.forEachIndexed { order, reference ->
-                if (order >= IMMEDIATE_PREFETCH_ASSET_COUNT) {
+
+            if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
+                val allOtherCloudRefs = allOtherRainRefs.mapNotNull { rainRef ->
+                    closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)
+                }.distinctBy { it.assetPath }
+                allOtherCloudRefs.forEach { reference ->
                     delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
-                }
-                val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
-                if (progress >= 1f) {
-                    return@forEachIndexed
-                }
-                runCatching {
-                    radarRepository.prefetchAsset(reference) { loadProgress ->
-                        markAssetProgress(reference.assetPath, loadProgress)
-                    }
-                }.onFailure { throwable ->
-                    if (throwable is CancellationException) {
-                        throw throwable
+                    val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
+                    if (progress < 1f) {
+                        runCatching {
+                            radarRepository.prefetchAsset(reference) { loadProgress ->
+                                markAssetProgress(reference.assetPath, loadProgress)
+                            }
+                        }
                     }
                 }
             }
@@ -771,7 +821,7 @@ class RadarViewModel(
             centerIndex = centerIndex,
             includeCenter = false
         )
-            .take(MAX_PREFETCH_DECODE_FRAMES)
+            .take(maxLoadedFrames - 1)
             .distinctBy { it.timestampMillis }
     }
 
@@ -1042,6 +1092,7 @@ class RadarViewModel(
 
     private fun rememberLoadedCloudFrame(frame: RadarBitmapFrame) {
         loadedCloudFrames[frame.reference.timestampMillis] = frame
+        _uiState.update { it.copy(decodedCloudFrameTimestamps = loadedCloudFrames.keys.toSet()) }
     }
 
     private fun closestCloudReference(
@@ -1058,6 +1109,93 @@ class RadarViewModel(
 
     private fun rememberLoadedFrame(frame: RadarBitmapFrame) {
         loadedFrames[frame.reference.timestampMillis] = frame
+        _uiState.update { it.copy(decodedRainFrameTimestamps = loadedFrames.keys.toSet()) }
+    }
+
+    private fun updateCacheCapacities() {
+        val timeline = _uiState.value.timeline
+        val cloudTimeline = _uiState.value.cloudTimeline
+        val selectedIndex = _uiState.value.selectedFrameIndex
+        val layers = visualTimelineLayers(timeline)
+        
+        val selectedLayerIndex = layers.indexOfFirst { layer ->
+            selectedIndex in layer.startIndex until layer.endExclusive
+        }
+        
+        var rainCount = 0
+        var cloudCount = 0
+        
+        if (selectedLayerIndex != -1) {
+            val currentLayer = layers[selectedLayerIndex]
+            val currentLayerFrames = timeline.frames.subList(
+                currentLayer.startIndex.coerceIn(timeline.frames.indices),
+                currentLayer.endExclusive.coerceIn(0, timeline.frames.size)
+            )
+            
+            val pastLayerFrames = if (selectedLayerIndex - 1 >= 0) {
+                val pastLayer = layers[selectedLayerIndex - 1]
+                timeline.frames.subList(
+                    pastLayer.startIndex.coerceIn(timeline.frames.indices),
+                    pastLayer.endExclusive.coerceIn(0, timeline.frames.size)
+                )
+            } else {
+                emptyList()
+            }
+            
+            val nextLayer1Frames = if (selectedLayerIndex + 1 < layers.size) {
+                val nextLayer = layers[selectedLayerIndex + 1]
+                timeline.frames.subList(
+                    nextLayer.startIndex.coerceIn(timeline.frames.indices),
+                    nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
+                )
+            } else {
+                emptyList()
+            }
+            
+            val nextLayer2Frames = if (selectedLayerIndex + 2 < layers.size) {
+                val nextLayer = layers[selectedLayerIndex + 2]
+                timeline.frames.subList(
+                    nextLayer.startIndex.coerceIn(timeline.frames.indices),
+                    nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
+                )
+            } else {
+                emptyList()
+            }
+            
+            val rainFramesToLoad = currentLayerFrames + pastLayerFrames + nextLayer1Frames + nextLayer2Frames
+            rainCount = rainFramesToLoad.size
+            
+            if (cloudTimeline.frames.isNotEmpty()) {
+                val cloudFramesToLoad = rainFramesToLoad.mapNotNull { rainRef ->
+                    closestCloudReference(rainRef.timestampMillis, cloudTimeline)
+                }.distinctBy { it.timestampMillis }
+                cloudCount = cloudFramesToLoad.size
+            }
+        }
+        
+        val newMaxFrames = maxOf(MAX_LOADED_FRAMES, rainCount)
+        val newMaxCloudFrames = maxOf(MAX_LOADED_CLOUD_FRAMES, cloudCount)
+        
+        maxLoadedFrames = newMaxFrames
+        maxLoadedCloudFrames = newMaxCloudFrames
+        
+        while (loadedFrames.size > maxLoadedFrames) {
+            val eldestKey = loadedFrames.keys.firstOrNull() ?: break
+            loadedFrames.remove(eldestKey)
+        }
+        while (loadedCloudFrames.size > maxLoadedCloudFrames) {
+            val eldestKey = loadedCloudFrames.keys.firstOrNull() ?: break
+            loadedCloudFrames.remove(eldestKey)
+        }
+        
+        radarRepository.resizeCache(maxLoadedFrames + maxLoadedCloudFrames)
+        
+        _uiState.update { state ->
+            state.copy(
+                decodedRainFrameTimestamps = loadedFrames.keys.toSet(),
+                decodedCloudFrameTimestamps = loadedCloudFrames.keys.toSet()
+            )
+        }
     }
 
     private fun updateMapCamera(transform: (MapCamera) -> MapCamera) {

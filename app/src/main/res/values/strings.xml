@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">DWD Regenradar</string>
     <string name="permission_location_title">Standort erlauben</string>
-    <string name="permission_location_body">Der Radar startet immer auf deinem aktuellen Standort.</string>
+    <string name="permission_location_body">Das Radar startet immer auf deinem aktuellen Standort.</string>
     <string name="permission_location_action">Einstellungen</string>
     <string name="permission_location_skip">Ohne Standort fortfahren</string>
     <string name="loading">Radar wird geladen…</string>

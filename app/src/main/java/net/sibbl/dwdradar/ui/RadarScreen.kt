@@ -94,6 +94,7 @@ import net.sibbl.dwdradar.map.CityCatalog
 import net.sibbl.dwdradar.map.MapViewport
 import net.sibbl.dwdradar.model.GeoPoint
 import net.sibbl.dwdradar.model.RadarFrameReference
+import net.sibbl.dwdradar.model.RadarTimeline
 import net.sibbl.dwdradar.model.ZoomPreset
 import net.sibbl.dwdradar.util.TimeFormatters
 import kotlin.math.PI
@@ -452,8 +453,7 @@ fun RadarScreen(
                             strokeWidth = ringStrokeWidthPx,
                             selectedFrameIndex = uiState.selectedFrameIndex,
                             nowFrameIndex = uiState.timeline.nowFrameIndex,
-                            frames = uiState.timeline.frames,
-                            frameLoadProgress = uiState.frameLoadProgress
+                            frames = uiState.timeline.frames
                         )
                     }
 
@@ -1204,8 +1204,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSegmentedTimeli
     strokeWidth: Float,
     selectedFrameIndex: Int,
     nowFrameIndex: Int,
-    frames: List<RadarFrameReference>,
-    frameLoadProgress: Map<Long, Float>
+    frames: List<RadarFrameReference>
 ) {
     val gapAngle = TIMELINE_SEGMENT_GAP_ANGLE
     val ringBounds = Size(radius * 2f, radius * 2f)
@@ -1260,21 +1259,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSegmentedTimeli
             size = ringBounds,
             style = Stroke(width = strokeWidth)
         )
-        if (frame != null) {
-            val loadProgress = frameLoadProgress[frame.timestampMillis]?.coerceIn(0f, 1f) ?: 0f
-            val pendingAlpha = (1f - loadProgress) * 0.72f
-            if (pendingAlpha > 0f) {
-                drawArc(
-                    color = Color(0xFF8E98A3).copy(alpha = pendingAlpha),
-                    startAngle = -90f + (segment * stepAngle) + gapAngle / 2f,
-                    sweepAngle = sweepAngle,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = ringBounds,
-                    style = Stroke(width = strokeWidth)
-                )
-            }
-        }
     }
 }
 
@@ -1284,22 +1268,19 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLoadingTimeline
     strokeWidth: Float,
     progress: Float
 ) {
-    val segmentCount = STEPS_PER_REVOLUTION
-    val stepAngle = 360f / segmentCount.toFloat()
     val ringBounds = Size(radius * 2f, radius * 2f)
     val topLeft = Offset(center.x - radius, center.y - radius)
-    val gapAngle = stepAngle * 0.92f
 
     drawCircle(
-        color = Color(0xFFA8F4FF).copy(alpha = 0.78f),
+        color = Color(0xFF111821).copy(alpha = 0.5f),
         radius = radius,
         center = center,
         style = Stroke(width = strokeWidth)
     )
     drawArc(
-        color = Color(0xFF111821).copy(alpha = 0.55f),
+        color = Color(0xFFA8F4FF).copy(alpha = 0.78f),
         startAngle = -90f + (progress.coerceIn(0f, 1f) * 360f),
-        sweepAngle = gapAngle,
+        sweepAngle = 270f,
         useCenter = false,
         topLeft = topLeft,
         size = ringBounds,

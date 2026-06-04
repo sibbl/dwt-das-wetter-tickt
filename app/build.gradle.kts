@@ -80,8 +80,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.concurrent:concurrent-futures:1.3.0")
-    implementation("androidx.wear.tiles:tiles:1.4.1")
-    implementation("androidx.wear.tiles:tiles-material:1.4.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

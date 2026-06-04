@@ -31,6 +31,8 @@ data class RadarUiState(
     val layerMenuScrollDp: Float = 0f,
     val userLocation: GeoPoint? = null,
     val isLocationLoading: Boolean = false,
+    val decodedRainFrameTimestamps: Set<Long> = emptySet(),
+    val decodedCloudFrameTimestamps: Set<Long> = emptySet(),
     val errorMessage: String? = null
 ) {
     val zoomPreset: ZoomPreset

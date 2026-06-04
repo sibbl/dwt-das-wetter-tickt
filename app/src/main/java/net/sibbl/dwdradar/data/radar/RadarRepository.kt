@@ -32,6 +32,10 @@ class RadarRepository(
     private val assetMutex = Mutex()
     private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_FRAMES) {}
 
+    fun resizeCache(newMaxSize: Int) {
+        bitmapCache.resize(newMaxSize)
+    }
+
     suspend fun loadTimeline(
         forceRefresh: Boolean = false,
         layerKey: String = RadarBackend.PRECIPITATION_LAYER
