@@ -1,5 +1,5 @@
 #!/bin/bash
-IP="192.168.0.133"
+IP="${1:-192.168.0.132}"
 echo "Searching for Wear OS ADB services for $IP via mDNS..."
 SERVICES=$(adb mdns services | grep "$IP")
 
