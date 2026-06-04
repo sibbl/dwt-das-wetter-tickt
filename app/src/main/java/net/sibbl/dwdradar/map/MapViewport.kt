@@ -13,20 +13,20 @@ class MapViewport(
     private val mapRect: Rect,
     private val camera: MapCamera
 ) {
-    private val fullSouthWest = MercatorProjection.project(RadarBackend.defaultBounds.southWest)
-    private val fullNorthEast = MercatorProjection.project(RadarBackend.defaultBounds.northEast)
-    private val cameraCenter = MercatorProjection.project(camera.center)
+    private val fullSouthWest = RadolanProjection.project(RadarBackend.defaultBounds.southWest)
+    private val fullNorthEast = RadolanProjection.project(RadarBackend.defaultBounds.northEast)
+    private val cameraCenter = RadolanProjection.project(camera.center)
     private val projectedWidth = fullNorthEast.x - fullSouthWest.x
-    private val projectedHeight = fullSouthWest.y - fullNorthEast.y
+    private val projectedHeight = fullNorthEast.y - fullSouthWest.y
     private val pixelsPerProjectedUnit = min(
         mapRect.width / projectedWidth.toFloat(),
         mapRect.height / projectedHeight.toFloat()
     ) * camera.zoomPreset.scaleMultiplier
 
     fun toScreen(point: GeoPoint): Offset {
-        val projectedPoint = MercatorProjection.project(point)
+        val projectedPoint = RadolanProjection.project(point)
         val dx = ((projectedPoint.x - cameraCenter.x) * pixelsPerProjectedUnit).toFloat()
-        val dy = ((projectedPoint.y - cameraCenter.y) * pixelsPerProjectedUnit).toFloat()
+        val dy = -((projectedPoint.y - cameraCenter.y) * pixelsPerProjectedUnit).toFloat()
         return Offset(
             x = mapRect.center.x + dx,
             y = mapRect.center.y + dy
@@ -47,9 +47,9 @@ class MapViewport(
     fun panCenterBy(deltaX: Float, deltaY: Float): GeoPoint {
         val translated = ProjectedPoint(
             x = cameraCenter.x - (deltaX / pixelsPerProjectedUnit),
-            y = cameraCenter.y - (deltaY / pixelsPerProjectedUnit)
+            y = cameraCenter.y + (deltaY / pixelsPerProjectedUnit)
         )
-        val geoPoint = MercatorProjection.unproject(translated)
+        val geoPoint = RadolanProjection.unproject(translated)
         return clampToRadarBounds(geoPoint)
     }
 
