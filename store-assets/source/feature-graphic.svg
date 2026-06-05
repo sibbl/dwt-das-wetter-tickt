@@ -1,0 +1,41 @@
+<svg width="1024" height="500" viewBox="0 0 1024 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DWT – Das Wetter tickt feature graphic">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1024" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111C"/>
+      <stop offset="0.55" stop-color="#102A46"/>
+      <stop offset="1" stop-color="#25164A"/>
+    </linearGradient>
+    <linearGradient id="dropGradient" x1="142" y1="74" x2="370" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#73E7FF"/>
+      <stop offset="0.46" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="softHighlight" x1="176" y1="118" x2="280" y2="268" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="radarGlow">
+      <stop offset="0" stop-color="#73E7FF" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#3B82F6" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="500" fill="url(#background)"/>
+  <circle cx="793" cy="250" r="210" fill="url(#radarGlow)"/>
+  <circle cx="793" cy="250" r="170" fill="none" stroke="#73E7FF" stroke-opacity="0.15" stroke-width="2"/>
+  <circle cx="793" cy="250" r="120" fill="none" stroke="#73E7FF" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="793" cy="250" r="72" fill="none" stroke="#73E7FF" stroke-opacity="0.1" stroke-width="2"/>
+  <path d="M793 58V442M601 250H985M657 114L929 386M929 114L657 386" stroke="#73E7FF" stroke-opacity="0.08" stroke-width="2"/>
+  <text x="82" y="176" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700">DWT</text>
+  <text x="84" y="238" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="45" font-weight="700">Das Wetter tickt</text>
+  <text x="86" y="286" fill="#C9DAE9" font-family="Arial, Helvetica, sans-serif" font-size="24">Regen- und Wolkenradar am Handgelenk</text>
+  <rect x="84" y="320" width="255" height="4" rx="2" fill="url(#dropGradient)"/>
+  <g transform="translate(601 -6) scale(0.75)">
+    <path d="M256 64C256 64 136 204 136 318C136 399.2 188.6 448 256 448C323.4 448 376 399.2 376 318C376 204 256 64 256 64Z" fill="#000000" fill-opacity="0.35" filter="url(#shadow)"/>
+    <path d="M256 64C256 64 136 204 136 318C136 399.2 188.6 448 256 448C323.4 448 376 399.2 376 318C376 204 256 64 256 64Z" fill="url(#dropGradient)"/>
+    <path d="M226 116C191.5 157.6 166 206.7 157.7 257.4C153.9 280.5 170.7 287.8 184.3 268.6C203.1 242.1 229.4 200.2 271.6 135.9C284.8 115.8 245.2 92.9 226 116Z" fill="url(#softHighlight)" opacity="0.7"/>
+  </g>
+</svg>

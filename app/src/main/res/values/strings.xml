@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">DWD Regenradar</string>
+    <string name="app_name">DWT – Das Wetter tickt</string>
     <string name="permission_location_title">Standort erlauben</string>
     <string name="permission_location_body">Das Radar startet immer auf deinem aktuellen Standort.</string>
     <string name="permission_location_action">Einstellungen</string>
@@ -21,7 +21,7 @@
     <string name="about">Info</string>
     <string name="about_version_format">Version %1$s</string>
     <string name="about_made_by">Made by sibbl</string>
-    <string name="about_github">GitHub: repo folgt</string>
-    <string name="about_data_source">Datenquelle: Deutscher Wetterdienst (DWD), WarnWetter Karten- und Animationsdaten.</string>
+    <string name="about_github">Open Source</string>
+    <string name="about_data_source">Datenbasis: Deutscher Wetterdienst (DWD), WarnWetter Rasterdaten bildlich wiedergegeben. Unabhängige App.</string>
     <string name="close">Schließen</string>
 </resources>

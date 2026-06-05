@@ -17,6 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DwdRadarWear"
+rootProject.name = "DwtWetterRadar"
 include(":app")
-

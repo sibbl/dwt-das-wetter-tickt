@@ -5,16 +5,38 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val appVersionName = providers.environmentVariable("APP_VERSION_NAME").orElse("0.0.0-dev").get()
+val semanticVersion = Regex("""^(\d+)\.(\d+)\.(\d+)$""").matchEntire(appVersionName)
+val semanticVersionParts = semanticVersion?.groupValues?.drop(1)?.map(String::toLong)
+val hasValidVersionParts = semanticVersionParts?.let { (major, minor, patch) ->
+    minor <= 999 && patch <= 999 && major * 1_000_000 + minor * 1_000 + patch <= 2_100_000_000
+} ?: false
+val appVersionCode = semanticVersionParts
+    ?.takeIf { hasValidVersionParts }
+    ?.let { (major, minor, patch) -> (major * 1_000_000 + minor * 1_000 + patch).toInt() }
+    ?: 1
+
+val signingStoreFile = providers.environmentVariable("SIGNING_STORE_FILE").orNull
+val signingStorePassword = providers.environmentVariable("SIGNING_STORE_PASSWORD").orNull
+val signingKeyAlias = providers.environmentVariable("SIGNING_KEY_ALIAS").orNull
+val signingKeyPassword = providers.environmentVariable("SIGNING_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    signingStoreFile,
+    signingStorePassword,
+    signingKeyAlias,
+    signingKeyPassword
+).all { it != null }
+
 android {
-    namespace = "net.sibbl.dwdradar"
+    namespace = "net.sibbl.dwt"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "net.sibbl.dwdradar"
+        applicationId = "net.sibbl.dwt"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -22,9 +44,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(signingStoreFile))
+                storePassword = requireNotNull(signingStorePassword)
+                keyAlias = requireNotNull(signingKeyAlias)
+                keyPassword = requireNotNull(signingKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -55,6 +91,24 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+}
+
+tasks.register("verifyReleaseConfiguration") {
+    doLast {
+        check(semanticVersion != null) {
+            "APP_VERSION_NAME must use MAJOR.MINOR.PATCH format for release builds."
+        }
+        check(hasValidVersionParts) {
+            "APP_VERSION_NAME minor and patch must be at most 999 and produce a version code at most 2100000000."
+        }
+        check(hasReleaseSigning) {
+            "Release signing requires SIGNING_STORE_FILE, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, and SIGNING_KEY_PASSWORD."
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    dependsOn("verifyReleaseConfiguration")
 }
 
 dependencies {

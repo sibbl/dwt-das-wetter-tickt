@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release DWT"
+  short_description: "Validate and publish a signed DWT release"
+  default_prompt: "Prepare and validate the next DWT – Das Wetter tickt release."
