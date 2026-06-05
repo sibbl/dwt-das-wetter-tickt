@@ -2,6 +2,8 @@
 
 A standalone Wear OS app for viewing rain and cloud radar data directly on your watch.
 
+![DWT radar map running on a Pixel Watch](store-assets/wear-screenshots/01-radar-map.png)
+
 ## Features
 
 - Animated radar timeline with past observations and forecasts
