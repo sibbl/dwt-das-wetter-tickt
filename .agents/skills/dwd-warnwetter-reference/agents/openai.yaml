@@ -1,0 +1,4 @@
+interface:
+  display_name: "DWD WarnWetter Reference"
+  short_description: "Reference WarnWetter backend and rendering notes"
+  default_prompt: "Use the historical WarnWetter notes to investigate this DWT backend or rendering task."

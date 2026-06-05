@@ -77,3 +77,50 @@ this.backgroundLayer = m29924L(
 ```
 
 That `c6443c` instance is `de.dwd.warnapp.map.C6443c`, which loads style JSON and local sprite assets and swaps the dev host to the production host.
+
+## Rendering pipeline
+
+The base map uses bundled style JSON and OpenMobileMaps. The current interactive
+path creates a native `LayerManagerInterface`, attaches it to `WWMapView`, and
+hands it the overview, active types, and current time.
+
+The legacy path uses `MapOverlayFactory.addAnimationOverlay(...)`, configures
+radar color maps and pattern textures, then starts loading sections. Java
+primarily orchestrates loading and active types; native code performs
+compositing, timing, and map-layer integration.
+
+Important native boundaries:
+
+- `LayerManagerInterface.createAnimationWithOpenGl(...)`
+- `LayerManagerInterface.addToMap(...)`
+- `LayerManagerInterface.setOverview(...)`
+- `LayerManagerInterface.setTime(...)`
+- `AnimationOverlayHandler.startLoadingSections(...)`
+- `MapOverlayFactory.addAnimationOverlay(...)`
+
+## Radar assets and coloring
+
+| Asset | Purpose |
+| --- | --- |
+| `shader_scales/precip_scale_17.png` | Main precipitation lookup texture |
+| `shader_scales/precip_scale.png` | Secondary legacy precipitation lookup |
+| `shader_scales/precipitation_pattern.png` | Radar pattern texture |
+| `shader_scales/blitz_atlas.png` | Lightning atlas |
+| `shader_scales/blitz_forecast_pattern.png` | Forecast-lightning pattern |
+| `shader_scales/temp_scale.png` | Temperature lookup |
+| `shader_scales/wind_scale.png` | Wind lookup |
+
+The legacy renderer explicitly combines the raw radar image with precipitation
+lookup and pattern textures. The newer renderer still receives a radar pattern,
+while color handling appears to live deeper in the native renderer.
+
+The lightweight homescreen path downloads
+`radar_wolken_blitz_homescreen.zip`, containing:
+
+```text
+cloud.png
+radar.png
+blitz.png
+```
+
+It applies `precip_scale_17.png` to the radar image before compositing.

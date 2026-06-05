@@ -126,3 +126,35 @@ blitz.png
 ## What this means
 
 The backend has a **newer V3 format** for major animated weather layers and a **still-supported ZIP format** for some legacy/lightning paths. The current app contains both old and new client-side loading abstractions, so it is best to treat them as **parallel pipelines**, not as one perfectly uniform format.
+
+## Models and loading
+
+The following notes describe the corresponding Java-side models and loaders.
+
+### Core Java-side models
+
+| Class | Role |
+| --- | --- |
+| `AnimationOverviewModel` | Parsed overview JSON: sections, ranges, measurement times, optional isobars data |
+| `DataSection` | One time range with a `files` map keyed by animation/backend identifier |
+| `DataSectionFile` | Lazy loader for a section file plus per-layer `timeStep` |
+| `ZipSection` | Older single-layer section wrapper |
+
+`AnimationOverviewModel` turns JSON into range metadata plus per-layer section
+lists. Each `DataSection` exposes files keyed by backend identifiers such as
+`RADAR`, `WIND`, `CLOUDS`, `BLITZ`, and `ORTE_*`.
+
+The older ZIP loader downloads a section and reads timestamped entries:
+
+```text
+TIMESTAMP.png
+TIMESTAMP.json
+TIMESTAMP_stationType.json
+```
+
+The decompiled Java legacy loader is ZIP-oriented, while live V3 precipitation,
+wind, and cloud files were animated WebP. The safest interpretation is:
+
+1. The legacy Java ZIP loader remains valid for legacy and ZIP-backed layers.
+2. The native `LayerManagerInterface` path consumes animated WebP directly.
+3. Both formats coexist behind the high-level overview model.

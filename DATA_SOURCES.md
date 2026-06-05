@@ -12,10 +12,10 @@ assets. It does not license DWD data, trademarks, or third-party material.
 
 ## Publication Status
 
-The WarnWetter endpoints currently used by the app are not clearly identified
-as DWD Open Data. Before publishing the app, obtain written permission from DWD
-for this use or migrate the app to a DWD source whose license explicitly
-permits redistribution and app use.
+The developer has confirmed that written DWD permission for the app's use of
+the WarnWetter endpoints has been obtained. Keep that permission on file and
+reconfirm its scope before changing data sources, distribution channels, or
+commercial use.
 
 Relevant DWD information:
 
