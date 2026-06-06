@@ -3,13 +3,13 @@ package net.sibbl.dwt.ui
 import android.content.Context
 import android.content.Intent
 import android.view.ViewConfiguration
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -851,62 +851,63 @@ private fun LayerMenuSheet(
     val screenHeightDp = configuration.screenHeightDp
     val currentContentScrollDp by rememberUpdatedState(contentScrollDp)
     val currentOnContentScrollChange by rememberUpdatedState(onContentScrollChange)
-    val sheetOffset by animateDpAsState(
-        targetValue = if (expanded) {
-            (screenHeightDp - 142f - contentScrollDp).coerceAtLeast(0f).dp
-        } else {
-            (screenHeightDp - 22f).dp
-        },
-        animationSpec = tween(durationMillis = 260)
+    val openOffsetDp = (screenHeightDp - 142f).coerceAtLeast(0f)
+    val closedOffsetDp = (screenHeightDp - 22f).coerceAtLeast(openOffsetDp)
+    val settledOffsetDp = if (expanded) {
+        (openOffsetDp - contentScrollDp).coerceAtLeast(0f)
+    } else {
+        closedOffsetDp
+    }
+    var isDragging by remember { mutableStateOf(false) }
+    var draggedOffsetDp by remember(closedOffsetDp) { mutableStateOf(closedOffsetDp) }
+    val displayedOffsetDp by animateFloatAsState(
+        targetValue = if (isDragging) draggedOffsetDp else settledOffsetDp,
+        animationSpec = if (isDragging) snap() else tween(durationMillis = 260)
     )
-    val sheetReveal by animateFloatAsState(
-        targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(durationMillis = 220)
-    )
-    var verticalDragTotal by remember { mutableStateOf(0f) }
-    var dragStartScrollDp by remember { mutableStateOf(0f) }
-    var dragLastScrollDp by remember { mutableStateOf(0f) }
+    val displayedReveal =
+        ((closedOffsetDp - displayedOffsetDp) / (closedOffsetDp - openOffsetDp).coerceAtLeast(1f))
+            .coerceIn(0f, 1f)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(screenHeightDp.dp)
-            .offset(y = sheetOffset)
-            .pointerInput(expanded) {
+            .offset(y = displayedOffsetDp.dp)
+            .pointerInput(expanded, openOffsetDp, closedOffsetDp, maxScrollDp) {
                 detectVerticalDragGestures(
                     onDragStart = {
-                        verticalDragTotal = 0f
-                        dragStartScrollDp = currentContentScrollDp
-                        dragLastScrollDp = currentContentScrollDp
+                        draggedOffsetDp = displayedOffsetDp
+                        isDragging = true
                     },
                     onVerticalDrag = { change, dragAmount ->
-                        verticalDragTotal += dragAmount
-                        if (expanded) {
-                            val dragDp = with(density) { verticalDragTotal.toDp().value }
-                            dragLastScrollDp = (dragStartScrollDp - dragDp)
-                                .coerceIn(0f, maxScrollDp)
-                            currentOnContentScrollChange(dragLastScrollDp)
-                        }
+                        val dragDp = with(density) { dragAmount.toDp().value }
+                        draggedOffsetDp = (draggedOffsetDp + dragDp).coerceIn(0f, closedOffsetDp)
                         change.consume()
                     },
                     onDragEnd = {
-                        when {
-                            !expanded && verticalDragTotal < -12f -> onExpandedChange(true)
-                            expanded && verticalDragTotal > 18f && dragLastScrollDp <= 1f -> {
-                                onExpandedChange(false)
+                        isDragging = false
+                        if (!expanded) {
+                            if (closedOffsetDp - draggedOffsetDp >= MENU_DRAG_SETTLE_THRESHOLD_DP) {
+                                onExpandedChange(true)
                             }
+                        } else if (draggedOffsetDp > openOffsetDp + MENU_DRAG_SETTLE_THRESHOLD_DP) {
+                            onExpandedChange(false)
+                        } else {
+                            currentOnContentScrollChange(
+                                (openOffsetDp - draggedOffsetDp).coerceIn(0f, maxScrollDp)
+                            )
                         }
                     },
-                    onDragCancel = { verticalDragTotal = 0f }
+                    onDragCancel = { isDragging = false }
                 )
             }
             .background(
-                color = Color(0xE60B111A).copy(alpha = 0.90f * sheetReveal),
+                color = Color(0xE60B111A).copy(alpha = 0.90f * displayedReveal),
                 shape = RoundedCornerShape(0.dp)
             ),
         contentAlignment = Alignment.TopCenter
     ) {
-        if (expanded) {
+        if (expanded || displayedReveal > 0f) {
             MenuSheetContent(
                 rainEnabled = rainEnabled,
                 cloudsEnabled = cloudsEnabled,
@@ -1937,6 +1938,7 @@ private const val DOUBLE_TAP_DRAG_TIMEOUT_MILLIS = 320L
 private const val GESTURE_LONG_PRESS_TIMEOUT_MILLIS = 520L
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
 private const val LOADING_RING_DURATION_MILLIS = 900
+private const val MENU_DRAG_SETTLE_THRESHOLD_DP = 18f
 private const val MIN_RADIAL_SCROLL_DEGREES = 0.35f
 private const val LAYER_MENU_COLLAPSED_OFFSET_DP = 173f
 private const val LAYER_MENU_EXPANDED_OFFSET_DP = 48f
