@@ -92,6 +92,7 @@ class RadarViewModel(
     private var frameJob: Job? = null
     private var cloudFrameJob: Job? = null
     private var lightningFrameJob: Job? = null
+    private var timelineRefreshJob: Job? = null
     private var prefetchJob: Job? = null
     private var longPressLocationRefreshJob: Job? = null
     private var longPressLocationRefreshGeneration = 0
@@ -109,6 +110,7 @@ class RadarViewModel(
     }
 
     fun onAppOpened() {
+        refreshTimeline(forceRefresh = true, selectNow = true)
         val timeline = _uiState.value.timeline
         if (timeline.frames.isEmpty()) {
             return
@@ -405,8 +407,9 @@ class RadarViewModel(
         }
     }
 
-    private fun refreshTimeline(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+    private fun refreshTimeline(forceRefresh: Boolean = false, selectNow: Boolean = false) {
+        timelineRefreshJob?.cancel()
+        timelineRefreshJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
                     isLoading = state.timeline.frames.isEmpty(),
@@ -444,7 +447,8 @@ class RadarViewModel(
                     applyTimelines(
                         timeline = precipitationTimeline,
                         cloudTimeline = cloudTimeline,
-                        lightningTimeline = lightningTimeline
+                        lightningTimeline = lightningTimeline,
+                        selectNow = selectNow
                     )
                     return@launch
                 }.onFailure { throwable ->
@@ -528,19 +532,18 @@ class RadarViewModel(
     private fun applyTimelines(
         timeline: RadarTimeline,
         cloudTimeline: RadarTimeline,
-        lightningTimeline: RadarTimeline
+        lightningTimeline: RadarTimeline,
+        selectNow: Boolean
     ) {
         val previousState = _uiState.value
         val previousTimestamp = previousState.timeline.frames
             .getOrNull(previousState.selectedFrameIndex)
             ?.timestampMillis
-        val preservedIndex = if (previousTimestamp != null && timeline.frames.isNotEmpty()) {
-            timeline.frames.indices.minBy { index ->
-                kotlin.math.abs(timeline.frames[index].timestampMillis - previousTimestamp)
-            }
-        } else {
-            timeline.nowFrameIndex
-        }
+        val preservedIndex = selectedIndexAfterTimelineRefresh(
+            timeline = timeline,
+            previousTimestamp = previousTimestamp,
+            selectNow = selectNow
+        )
         _uiState.update { state ->
             val reference = timeline.frames.getOrNull(preservedIndex)
             state.copy(
@@ -1457,5 +1460,18 @@ class RadarViewModel(
         const val TIMELINE_RETRY_DELAY_MILLIS = 450L
         const val ZOOM_SWIPE_PIXELS_PER_STEP = 42f
         const val ROTARY_CLOSE_COOLDOWN_MILLIS = 500L
+    }
+}
+
+internal fun selectedIndexAfterTimelineRefresh(
+    timeline: RadarTimeline,
+    previousTimestamp: Long?,
+    selectNow: Boolean
+): Int {
+    if (selectNow || previousTimestamp == null || timeline.frames.isEmpty()) {
+        return timeline.nowFrameIndex
+    }
+    return timeline.frames.indices.minBy { index ->
+        kotlin.math.abs(timeline.frames[index].timestampMillis - previousTimestamp)
     }
 }
