@@ -1,7 +1,13 @@
 package net.sibbl.dwt.data.radar
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import net.sibbl.dwt.model.GeoBounds
+import net.sibbl.dwt.model.GeoPoint
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 object RadarFrameColorizer {
     private val palette = intArrayOf(
@@ -81,6 +87,48 @@ object RadarFrameColorizer {
         return mutableBitmap
     }
 
+    fun renderLightning(source: ByteArray, bounds: GeoBounds): Bitmap {
+        val bitmap = Bitmap.createBitmap(LIGHTNING_BITMAP_SIZE, LIGHTNING_BITMAP_SIZE, Bitmap.Config.ARGB_8888)
+        if (source.isEmpty()) {
+            return bitmap
+        }
+        val canvas = Canvas(bitmap)
+        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(210, 255, 174, 0)
+            style = Paint.Style.FILL
+        }
+        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        decodeLightningPoints(source, bounds).forEach { point ->
+            val latitude = point.latitude
+            val longitude = point.longitude
+            val x = (((longitude - bounds.southWest.longitude) /
+                (bounds.northEast.longitude - bounds.southWest.longitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
+            val y = (((bounds.northEast.latitude - latitude) /
+                (bounds.northEast.latitude - bounds.southWest.latitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
+            canvas.drawCircle(x, y, 3.5f, glowPaint)
+            canvas.drawCircle(x, y, 1.5f, corePaint)
+        }
+        return bitmap
+    }
+
+    internal fun decodeLightningPoints(source: ByteArray, bounds: GeoBounds): List<GeoPoint> {
+        val buffer = ByteBuffer.wrap(source).order(ByteOrder.BIG_ENDIAN)
+        return buildList {
+            while (buffer.remaining() >= 8) {
+                val point = GeoPoint(
+                    latitude = buffer.float.toDouble(),
+                    longitude = buffer.float.toDouble()
+                )
+                if (bounds.contains(point)) {
+                    add(point)
+                }
+            }
+        }
+    }
+
     private fun colorizePixel(color: Int): Int {
         if (Color.alpha(color) == 0) {
             return Color.TRANSPARENT
@@ -145,4 +193,6 @@ object RadarFrameColorizer {
             .coerceIn(0, 178)
         return Color.argb(alpha, 232, 236, 241)
     }
+
+    private const val LIGHTNING_BITMAP_SIZE = 384
 }

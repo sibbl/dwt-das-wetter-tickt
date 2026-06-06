@@ -8,7 +8,8 @@ class RadarLayerPreferenceStore(context: Context) {
     fun restore(): RadarLayerPreferences {
         return RadarLayerPreferences(
             rainVisible = prefs.getBoolean(KEY_RAIN_VISIBLE, true),
-            cloudVisible = prefs.getBoolean(KEY_CLOUD_VISIBLE, true)
+            cloudVisible = prefs.getBoolean(KEY_CLOUD_VISIBLE, true),
+            lightningVisible = prefs.getBoolean(KEY_LIGHTNING_VISIBLE, true)
         )
     }
 
@@ -24,14 +25,22 @@ class RadarLayerPreferenceStore(context: Context) {
             .apply()
     }
 
+    fun saveLightningVisible(visible: Boolean) {
+        prefs.edit()
+            .putBoolean(KEY_LIGHTNING_VISIBLE, visible)
+            .apply()
+    }
+
     private companion object {
         const val PREFS_NAME = "radar_layer_prefs"
         const val KEY_RAIN_VISIBLE = "rain_layer_visible"
         const val KEY_CLOUD_VISIBLE = "cloud_layer_visible"
+        const val KEY_LIGHTNING_VISIBLE = "lightning_layer_visible"
     }
 }
 
 data class RadarLayerPreferences(
     val rainVisible: Boolean,
-    val cloudVisible: Boolean
+    val cloudVisible: Boolean,
+    val lightningVisible: Boolean
 )

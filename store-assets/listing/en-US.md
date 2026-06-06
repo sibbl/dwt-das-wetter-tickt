@@ -6,15 +6,16 @@ DWT – Das Wetter tickt
 
 ## Short description
 
-Rain and cloud radar designed for your Wear OS watch.
+Rain, clouds, and lightning on your Wear OS watch.
 
 ## Full description
 
-Check current rain and cloud radar data directly from your wrist.
+Check current rain, cloud, and lightning data directly from your wrist.
 
 DWT – Das Wetter tickt is a standalone Wear OS app with an animated timeline of recent
 observations and forecasts. Use the crown or touch controls to move through
-time, pan the map, change zoom levels, and switch between rain and cloud layers.
+time, pan the map, change zoom levels, and switch between rain, cloud, and
+lightning layers.
 
 Optional location access centers the map on your position. The app also works
 without location permission.

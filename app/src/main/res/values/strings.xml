@@ -15,9 +15,10 @@
     <string name="time_minutes_format">%1$d min</string>
     <string name="time_hours_minutes_format">%1$d h %2$d min</string>
     <string name="zoom_kilometers_format">%1$d km</string>
-    <string name="map_content_description">Interaktive Regenkarte</string>
+    <string name="map_content_description">Interaktive Wetterkarte</string>
     <string name="layer_rain">Regen</string>
     <string name="layer_clouds">Wolken</string>
+    <string name="layer_lightning">Blitze</string>
     <string name="about">Info</string>
     <string name="about_version_format">Version %1$s</string>
     <string name="about_made_by">Made by sibbl</string>

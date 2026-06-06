@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.FlashOn
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
@@ -126,6 +128,7 @@ fun RadarScreen(
     onRefreshData: () -> Unit,
     onToggleRainLayer: () -> Unit,
     onToggleCloudLayer: () -> Unit,
+    onToggleLightningLayer: () -> Unit,
     onLayerMenuExpandedChange: (Boolean) -> Unit,
     onLayerMenuScroll: (Float) -> Unit,
     onLayerMenuScrollChange: (Float) -> Unit,
@@ -147,6 +150,9 @@ fun RadarScreen(
     val selectedCloudBitmap = remember(uiState.selectedCloudFrame?.bitmap) {
         uiState.selectedCloudFrame?.bitmap?.asImageBitmap()
     }
+    val selectedLightningBitmap = remember(uiState.selectedLightningFrame?.bitmap) {
+        uiState.selectedLightningFrame?.bitmap?.asImageBitmap()
+    }
     val cityLabelStyle = MaterialTheme.typography.labelSmall.copy(
         color = Color(0xFFF7FBFF),
         fontWeight = FontWeight.Medium,
@@ -165,28 +171,35 @@ fun RadarScreen(
         }
     }
     val selectedCloudFrameReady = uiState.selectedCloudFrame?.reference == selectedCloudReference
-
-    val showSelectedLoadProgress = when {
-        uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
-            (selectedReference != null && !selectedFrameReady) || 
-            (selectedCloudReference != null && !selectedCloudFrameReady)
+    val selectedLightningReference = remember(uiState.selectedFrameIndex, uiState.lightningTimeline) {
+        if (uiState.lightningTimeline.frames.isEmpty()) {
+            null
+        } else {
+            uiState.lightningTimeline.frames.minByOrNull { reference ->
+                kotlin.math.abs(reference.timestampMillis - selectedTimestamp)
+            }
         }
-        uiState.rainLayerVisible -> {
-            selectedReference != null && !selectedFrameReady
-        }
-        uiState.cloudLayerVisible -> {
-            selectedCloudReference != null && !selectedCloudFrameReady
-        }
-        else -> false
     }
+    val selectedLightningFrameReady =
+        uiState.selectedLightningFrame?.reference == selectedLightningReference
+
+    val showSelectedLoadProgress =
+        (uiState.rainLayerVisible && selectedReference != null && !selectedFrameReady) ||
+            (uiState.cloudLayerVisible && selectedCloudReference != null && !selectedCloudFrameReady) ||
+            (uiState.lightningLayerVisible &&
+                selectedLightningReference != null &&
+                !selectedLightningFrameReady)
 
     val selectedDisplayProgress = remember(
         uiState.rainLayerVisible,
         uiState.cloudLayerVisible,
+        uiState.lightningLayerVisible,
         selectedReference,
         selectedFrameReady,
         selectedCloudReference,
         selectedCloudFrameReady,
+        selectedLightningReference,
+        selectedLightningFrameReady,
         uiState.frameLoadProgress
     ) {
         val rainProgress = if (uiState.rainLayerVisible && selectedReference != null) {
@@ -200,25 +213,23 @@ fun RadarScreen(
             1f
         }
 
-        val combinedProgress = when {
-            uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
-                (rainProgress + cloudProgress) / 2f
-            }
-            uiState.rainLayerVisible -> {
-                rainProgress
-            }
-            uiState.cloudLayerVisible -> {
-                cloudProgress
-            }
-            else -> 1f
+        val lightningProgress = if (uiState.lightningLayerVisible && selectedLightningReference != null) {
+            uiState.frameLoadProgress[selectedLightningReference.timestampMillis]?.coerceIn(0f, 1f) ?: 0f
+        } else {
+            1f
         }
-
-        val isReadyInViewModel = when {
-            uiState.rainLayerVisible && uiState.cloudLayerVisible -> selectedFrameReady && selectedCloudFrameReady
-            uiState.rainLayerVisible -> selectedFrameReady
-            uiState.cloudLayerVisible -> selectedCloudFrameReady
-            else -> true
+        val activeProgress = buildList {
+            if (uiState.rainLayerVisible && selectedReference != null) add(rainProgress)
+            if (uiState.cloudLayerVisible && selectedCloudReference != null) add(cloudProgress)
+            if (uiState.lightningLayerVisible && selectedLightningReference != null) add(lightningProgress)
         }
+        val combinedProgress = activeProgress.average().toFloat().takeUnless(Float::isNaN) ?: 1f
+        val isReadyInViewModel =
+            (!uiState.rainLayerVisible || selectedReference == null || selectedFrameReady) &&
+                (!uiState.cloudLayerVisible || selectedCloudReference == null || selectedCloudFrameReady) &&
+                (!uiState.lightningLayerVisible ||
+                    selectedLightningReference == null ||
+                    selectedLightningFrameReady)
 
         if (!isReadyInViewModel && combinedProgress >= 1f) {
             FRAME_DECODE_PROGRESS_CAP
@@ -525,6 +536,26 @@ fun RadarScreen(
                             )
                         }
 
+                        if (
+                            uiState.lightningLayerVisible &&
+                            selectedLightningBitmap != null &&
+                            uiState.selectedLightningFrame != null &&
+                            selectedLightningFrameReady
+                        ) {
+                            val lightningRect = viewport.radarRect(uiState.selectedLightningFrame.bounds)
+                            drawImage(
+                                image = selectedLightningBitmap,
+                                dstOffset = androidx.compose.ui.unit.IntOffset(
+                                    lightningRect.left.toInt(),
+                                    lightningRect.top.toInt()
+                                ),
+                                dstSize = androidx.compose.ui.unit.IntSize(
+                                    lightningRect.width.toInt(),
+                                    lightningRect.height.toInt()
+                                )
+                            )
+                        }
+
                         drawCityLabels(
                             viewport = viewport,
                             zoomPreset = uiState.zoomPreset,
@@ -634,10 +665,12 @@ fun RadarScreen(
                 maxScrollDp = maxScrollDp,
                 rainEnabled = uiState.rainLayerVisible,
                 cloudsEnabled = uiState.cloudLayerVisible,
+                lightningEnabled = uiState.lightningLayerVisible,
                 onExpandedChange = ::setLayerMenuExpanded,
                 onContentScrollChange = onLayerMenuScrollChange,
                 onToggleRain = onToggleRainLayer,
                 onToggleClouds = onToggleCloudLayer,
+                onToggleLightning = onToggleLightningLayer,
                 onAbout = {
                     setLayerMenuExpanded(false)
                     context.startActivity(Intent(context, AboutActivity::class.java))
@@ -805,10 +838,12 @@ private fun LayerMenuSheet(
     maxScrollDp: Float,
     rainEnabled: Boolean,
     cloudsEnabled: Boolean,
+    lightningEnabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onContentScrollChange: (Float) -> Unit,
     onToggleRain: () -> Unit,
     onToggleClouds: () -> Unit,
+    onToggleLightning: () -> Unit,
     onAbout: () -> Unit
 ) {
     val density = LocalDensity.current
@@ -866,7 +901,7 @@ private fun LayerMenuSheet(
                 )
             }
             .background(
-                color = Color(0xF20B111A).copy(alpha = 0.95f * sheetReveal),
+                color = Color(0xE60B111A).copy(alpha = 0.90f * sheetReveal),
                 shape = RoundedCornerShape(0.dp)
             ),
         contentAlignment = Alignment.TopCenter
@@ -875,9 +910,11 @@ private fun LayerMenuSheet(
             MenuSheetContent(
                 rainEnabled = rainEnabled,
                 cloudsEnabled = cloudsEnabled,
+                lightningEnabled = lightningEnabled,
                 onExpandedChange = onExpandedChange,
                 onToggleRain = onToggleRain,
                 onToggleClouds = onToggleClouds,
+                onToggleLightning = onToggleLightning,
                 onAbout = onAbout
             )
         } else {
@@ -903,9 +940,11 @@ private fun MenuSheetContent(
     modifier: Modifier = Modifier,
     rainEnabled: Boolean,
     cloudsEnabled: Boolean,
+    lightningEnabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onToggleRain: () -> Unit,
     onToggleClouds: () -> Unit,
+    onToggleLightning: () -> Unit,
     onAbout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -947,6 +986,18 @@ private fun MenuSheetContent(
             ) { color ->
                 CloudIcon(color = color)
             }
+            RadarLayerToggleButton(
+                label = context.getString(R.string.layer_lightning),
+                enabled = lightningEnabled,
+                onClick = onToggleLightning
+            ) { color ->
+                Icon(
+                    imageVector = Icons.Rounded.FlashOn,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
         Box(
             modifier = Modifier
@@ -968,7 +1019,7 @@ private fun MenuSheetContent(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Settings,
+                    imageVector = Icons.Rounded.Info,
                     contentDescription = null,
                     tint = Color(0xFFEAF6FF),
                     modifier = Modifier.size(14.dp)

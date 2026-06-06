@@ -1,13 +1,13 @@
 # DWT – Das Wetter tickt
 
-A standalone Wear OS app for viewing rain and cloud radar data directly on your watch.
+A standalone Wear OS app for viewing rain, cloud, and lightning data directly on your watch.
 
 ![DWT radar map running on a Pixel Watch](store-assets/wear-screenshots/01-radar-map.png)
 
 ## Features
 
 - Animated radar timeline with past observations and forecasts
-- Toggleable rain and cloud layers
+- Toggleable rain, cloud, and lightning layers
 - Location-aware map with an optional locally stored last position
 - Pan and zoom controls designed for round watch displays
 - City labels, country outlines, and a compact timeline around the screen

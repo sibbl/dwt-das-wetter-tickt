@@ -112,4 +112,48 @@ class RadarTimelineBuilderTest {
             .inOrder()
         assertThat(timeline.frames[2].timeStepMillis).isEqualTo(300L)
     }
+
+    @Test
+    fun build_combinesLightningMeasurementsAndForecasts() {
+        val builder = RadarTimelineBuilder(RadarBackend.lightningLayers)
+        val overview = RadarOverviewDto(
+            now = 600L,
+            data = listOf(
+                RadarSectionDto(
+                    start = 0L,
+                    end = 600L,
+                    files = mapOf(
+                        RadarBackend.LIGHTNING_MEASUREMENT_LAYER to RadarFileDto(
+                            file = "measurement.zip",
+                            timeStep = 300L
+                        )
+                    )
+                ),
+                RadarSectionDto(
+                    start = 600L,
+                    end = 1_200L,
+                    files = mapOf(
+                        RadarBackend.LIGHTNING_FORECAST_LAYER to RadarFileDto(
+                            file = "forecast.zip",
+                            timeStep = 300L
+                        )
+                    )
+                )
+            )
+        )
+
+        val timeline = builder.build(overview, fallbackNowMillis = 0L)
+
+        assertThat(timeline.frames.map { it.assetPath })
+            .containsExactly("measurement.zip", "measurement.zip", "forecast.zip", "forecast.zip")
+            .inOrder()
+        assertThat(timeline.frames.map { it.layerKey })
+            .containsExactly(
+                RadarBackend.LIGHTNING_MEASUREMENT_LAYER,
+                RadarBackend.LIGHTNING_MEASUREMENT_LAYER,
+                RadarBackend.LIGHTNING_FORECAST_LAYER,
+                RadarBackend.LIGHTNING_FORECAST_LAYER
+            )
+            .inOrder()
+    }
 }

@@ -72,6 +72,7 @@ fun RadarApp(
         onRefreshData = viewModel::refreshRadarData,
         onToggleRainLayer = viewModel::toggleRainLayer,
         onToggleCloudLayer = viewModel::toggleCloudLayer,
+        onToggleLightningLayer = viewModel::toggleLightningLayer,
         onLayerMenuExpandedChange = viewModel::setLayerMenuOpen,
         onLayerMenuScroll = { delta -> viewModel.scrollLayerMenu(delta, maxScrollDp) },
         onLayerMenuScrollChange = { scroll -> viewModel.setLayerMenuScroll(scroll, maxScrollDp) },

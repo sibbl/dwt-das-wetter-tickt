@@ -9,6 +9,9 @@ object RadarBackend {
     const val OVERVIEW_URL = "${BASE_URL}animation_overview_v2.json"
     const val PRECIPITATION_LAYER = "PRECIPITATION"
     const val CLOUD_LAYER = "CLOUD"
+    const val LIGHTNING_MEASUREMENT_LAYER = "BLITZ_MEASUREMENT"
+    const val LIGHTNING_FORECAST_LAYER = "BLITZ_FORECAST"
+    val lightningLayers = listOf(LIGHTNING_MEASUREMENT_LAYER, LIGHTNING_FORECAST_LAYER)
 
     val defaultBounds = GeoBounds(
         southWest = GeoPoint(latitude = 43.75, longitude = 0.0),
