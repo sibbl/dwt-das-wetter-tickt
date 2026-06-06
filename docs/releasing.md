@@ -45,6 +45,21 @@ Publish `PRIVACY.md` at a public URL and add that URL to the Play Console store
 listing. Complete the Play Console data safety and Wear OS declarations based
 on the app's optional location access and direct DWD network requests.
 
+The public privacy policy URL is:
+
+```text
+https://github.com/sibbl/dwt-das-wetter-tickt/blob/main/PRIVACY.md
+```
+
+For a new personal Play developer account, complete account identity, Android
+device, and contact-phone verification before creating the app. Google also
+requires a closed test with at least 12 opted-in testers for 14 continuous days
+before production access can be requested:
+
+- https://support.google.com/googleplay/android-developer/answer/10841920
+- https://support.google.com/googleplay/android-developer/answer/14316361
+- https://support.google.com/googleplay/android-developer/answer/14151465
+
 Local debug builds use version `0.0.0-dev`. To verify a release build locally,
 set `APP_VERSION_NAME` and all four signing environment variables before running:
 
