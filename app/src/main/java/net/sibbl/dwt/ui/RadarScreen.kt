@@ -976,8 +976,8 @@ private fun MenuSheetContent(
                 label = context.getString(R.string.layer_rain),
                 enabled = rainEnabled,
                 onClick = onToggleRain
-            ) {
-                RainDropIcon(enabled = rainEnabled)
+            ) { color ->
+                RainDropIcon(color = color)
             }
             RadarLayerToggleButton(
                 label = context.getString(R.string.layer_clouds),
@@ -1113,7 +1113,7 @@ private fun RadarLayerToggleButton(
 }
 
 @Composable
-private fun RainDropIcon(enabled: Boolean) {
+private fun RainDropIcon(color: Color) {
     Canvas(modifier = Modifier.size(24.dp)) {
         fun svgX(value: Float): Float = size.width * value / 512f
         fun svgY(value: Float): Float = size.height * value / 512f
@@ -1127,39 +1127,7 @@ private fun RainDropIcon(enabled: Boolean) {
             close()
         }
 
-        if (enabled) {
-            drawPath(
-                path = dropPath,
-                brush = Brush.linearGradient(
-                    colorStops = arrayOf(
-                        0f to Color(0xFF73E7FF),
-                        0.46f to Color(0xFF3B82F6),
-                        1f to Color(0xFF7C3AED)
-                    ),
-                    start = Offset(svgX(142f), svgY(74f)),
-                    end = Offset(svgX(370f), svgY(440f))
-                )
-            )
-
-            val highlightPath = Path().apply {
-                moveTo(svgX(226f), svgY(116f))
-                cubicTo(svgX(191.5f), svgY(157.6f), svgX(166f), svgY(206.7f), svgX(157.7f), svgY(257.4f))
-                cubicTo(svgX(153.9f), svgY(280.5f), svgX(170.7f), svgY(287.8f), svgX(184.3f), svgY(268.6f))
-                cubicTo(svgX(203.1f), svgY(242.1f), svgX(229.4f), svgY(200.2f), svgX(271.6f), svgY(135.9f))
-                cubicTo(svgX(284.8f), svgY(115.8f), svgX(245.2f), svgY(92.9f), svgX(226f), svgY(116f))
-                close()
-            }
-            drawPath(
-                path = highlightPath,
-                brush = Brush.linearGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.504f), Color.Transparent),
-                    start = Offset(svgX(176f), svgY(118f)),
-                    end = Offset(svgX(280f), svgY(268f))
-                )
-            )
-        } else {
-            drawPath(path = dropPath, color = Color.White.copy(alpha = 0.8f))
-        }
+        drawPath(path = dropPath, color = color)
     }
 }
 
