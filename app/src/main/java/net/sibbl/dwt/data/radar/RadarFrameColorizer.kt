@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import net.sibbl.dwt.model.GeoBounds
 import net.sibbl.dwt.model.GeoPoint
 import java.nio.ByteBuffer
@@ -93,14 +94,17 @@ object RadarFrameColorizer {
             return bitmap
         }
         val canvas = Canvas(bitmap)
-        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(210, 255, 174, 0)
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.YELLOW
             style = Paint.Style.FILL
         }
-        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.RED
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+            strokeJoin = Paint.Join.MITER
         }
+        val boltPath = Path()
         decodeLightningPoints(source, bounds).forEach { point ->
             val latitude = point.latitude
             val longitude = point.longitude
@@ -108,8 +112,16 @@ object RadarFrameColorizer {
                 (bounds.northEast.longitude - bounds.southWest.longitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
             val y = (((bounds.northEast.latitude - latitude) /
                 (bounds.northEast.latitude - bounds.southWest.latitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
-            canvas.drawCircle(x, y, 3.5f, glowPaint)
-            canvas.drawCircle(x, y, 1.5f, corePaint)
+            boltPath.reset()
+            boltPath.moveTo(x + 0.5f, y - 5f)
+            boltPath.lineTo(x - 3f, y + 0.5f)
+            boltPath.lineTo(x - 0.5f, y + 0.5f)
+            boltPath.lineTo(x - 1.5f, y + 5f)
+            boltPath.lineTo(x + 3f, y - 1f)
+            boltPath.lineTo(x + 0.5f, y - 1f)
+            boltPath.close()
+            canvas.drawPath(boltPath, fillPaint)
+            canvas.drawPath(boltPath, borderPaint)
         }
         return bitmap
     }
