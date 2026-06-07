@@ -21,4 +21,12 @@ class RadarFrameColorizerTest {
         assertEquals(bounds.center.latitude, points.single().latitude, 0.001)
         assertEquals(bounds.center.longitude, points.single().longitude, 0.001)
     }
+
+    @Test
+    fun lightningForecastColorForIntensity_mapsDwdIntensityClasses() {
+        assertEquals(0, RadarFrameColorizer.lightningForecastColorForIntensity(0))
+        assertEquals(0xFFFFC000.toInt(), RadarFrameColorizer.lightningForecastColorForIntensity(85))
+        assertEquals(0xFFFF3C00.toInt(), RadarFrameColorizer.lightningForecastColorForIntensity(170))
+        assertEquals(0xFFFF3C00.toInt(), RadarFrameColorizer.lightningForecastColorForIntensity(255))
+    }
 }

@@ -112,9 +112,15 @@ class RadarRepository(
         val styledBitmap = ZipFile(zipFile).use { zip ->
             val entry = zip.getEntry("${reference.timestampMillis}.png")
                 ?: throw IOException("Missing frame for ${reference.timestampMillis}")
-            if (reference.layerKey in RadarBackend.lightningLayers) {
+            if (reference.layerKey == RadarBackend.LIGHTNING_MEASUREMENT_LAYER) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
-                RadarFrameColorizer.renderLightning(bytes, bounds)
+                RadarFrameColorizer.renderLightningMeasurements(bytes, bounds)
+            } else if (reference.layerKey == RadarBackend.LIGHTNING_FORECAST_LAYER) {
+                val decodedBitmap = zip.getInputStream(entry).use { input ->
+                    BitmapFactory.decodeStream(input)
+                        ?: throw IOException("Failed to decode lightning forecast for ${reference.timestampMillis}")
+                }
+                RadarFrameColorizer.renderLightningForecast(decodedBitmap)
             } else {
                 val decodedBitmap = zip.getInputStream(entry).use { input ->
                     BitmapFactory.decodeStream(input)
