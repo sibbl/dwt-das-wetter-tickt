@@ -115,6 +115,7 @@ class RadarScreenTest {
                     onRefreshData = {},
                     onToggleRainLayer = {},
                     onToggleCloudLayer = {},
+                    onToggleLightningLayer = {},
                     onLayerMenuExpandedChange = {},
                     onLayerMenuScroll = {},
                     onLayerMenuScrollChange = {},

@@ -3,13 +3,13 @@ package net.sibbl.dwt.ui
 import android.content.Context
 import android.content.Intent
 import android.view.ViewConfiguration
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.FlashOn
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
@@ -126,6 +128,7 @@ fun RadarScreen(
     onRefreshData: () -> Unit,
     onToggleRainLayer: () -> Unit,
     onToggleCloudLayer: () -> Unit,
+    onToggleLightningLayer: () -> Unit,
     onLayerMenuExpandedChange: (Boolean) -> Unit,
     onLayerMenuScroll: (Float) -> Unit,
     onLayerMenuScrollChange: (Float) -> Unit,
@@ -147,6 +150,9 @@ fun RadarScreen(
     val selectedCloudBitmap = remember(uiState.selectedCloudFrame?.bitmap) {
         uiState.selectedCloudFrame?.bitmap?.asImageBitmap()
     }
+    val selectedLightningBitmap = remember(uiState.selectedLightningFrame?.bitmap) {
+        uiState.selectedLightningFrame?.bitmap?.asImageBitmap()
+    }
     val cityLabelStyle = MaterialTheme.typography.labelSmall.copy(
         color = Color(0xFFF7FBFF),
         fontWeight = FontWeight.Medium,
@@ -165,28 +171,35 @@ fun RadarScreen(
         }
     }
     val selectedCloudFrameReady = uiState.selectedCloudFrame?.reference == selectedCloudReference
-
-    val showSelectedLoadProgress = when {
-        uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
-            (selectedReference != null && !selectedFrameReady) || 
-            (selectedCloudReference != null && !selectedCloudFrameReady)
+    val selectedLightningReference = remember(uiState.selectedFrameIndex, uiState.lightningTimeline) {
+        if (uiState.lightningTimeline.frames.isEmpty()) {
+            null
+        } else {
+            uiState.lightningTimeline.frames.minByOrNull { reference ->
+                kotlin.math.abs(reference.timestampMillis - selectedTimestamp)
+            }
         }
-        uiState.rainLayerVisible -> {
-            selectedReference != null && !selectedFrameReady
-        }
-        uiState.cloudLayerVisible -> {
-            selectedCloudReference != null && !selectedCloudFrameReady
-        }
-        else -> false
     }
+    val selectedLightningFrameReady =
+        uiState.selectedLightningFrame?.reference == selectedLightningReference
+
+    val showSelectedLoadProgress =
+        (uiState.rainLayerVisible && selectedReference != null && !selectedFrameReady) ||
+            (uiState.cloudLayerVisible && selectedCloudReference != null && !selectedCloudFrameReady) ||
+            (uiState.lightningLayerVisible &&
+                selectedLightningReference != null &&
+                !selectedLightningFrameReady)
 
     val selectedDisplayProgress = remember(
         uiState.rainLayerVisible,
         uiState.cloudLayerVisible,
+        uiState.lightningLayerVisible,
         selectedReference,
         selectedFrameReady,
         selectedCloudReference,
         selectedCloudFrameReady,
+        selectedLightningReference,
+        selectedLightningFrameReady,
         uiState.frameLoadProgress
     ) {
         val rainProgress = if (uiState.rainLayerVisible && selectedReference != null) {
@@ -200,25 +213,23 @@ fun RadarScreen(
             1f
         }
 
-        val combinedProgress = when {
-            uiState.rainLayerVisible && uiState.cloudLayerVisible -> {
-                (rainProgress + cloudProgress) / 2f
-            }
-            uiState.rainLayerVisible -> {
-                rainProgress
-            }
-            uiState.cloudLayerVisible -> {
-                cloudProgress
-            }
-            else -> 1f
+        val lightningProgress = if (uiState.lightningLayerVisible && selectedLightningReference != null) {
+            uiState.frameLoadProgress[selectedLightningReference.timestampMillis]?.coerceIn(0f, 1f) ?: 0f
+        } else {
+            1f
         }
-
-        val isReadyInViewModel = when {
-            uiState.rainLayerVisible && uiState.cloudLayerVisible -> selectedFrameReady && selectedCloudFrameReady
-            uiState.rainLayerVisible -> selectedFrameReady
-            uiState.cloudLayerVisible -> selectedCloudFrameReady
-            else -> true
+        val activeProgress = buildList {
+            if (uiState.rainLayerVisible && selectedReference != null) add(rainProgress)
+            if (uiState.cloudLayerVisible && selectedCloudReference != null) add(cloudProgress)
+            if (uiState.lightningLayerVisible && selectedLightningReference != null) add(lightningProgress)
         }
+        val combinedProgress = activeProgress.average().toFloat().takeUnless(Float::isNaN) ?: 1f
+        val isReadyInViewModel =
+            (!uiState.rainLayerVisible || selectedReference == null || selectedFrameReady) &&
+                (!uiState.cloudLayerVisible || selectedCloudReference == null || selectedCloudFrameReady) &&
+                (!uiState.lightningLayerVisible ||
+                    selectedLightningReference == null ||
+                    selectedLightningFrameReady)
 
         if (!isReadyInViewModel && combinedProgress >= 1f) {
             FRAME_DECODE_PROGRESS_CAP
@@ -525,6 +536,26 @@ fun RadarScreen(
                             )
                         }
 
+                        if (
+                            uiState.lightningLayerVisible &&
+                            selectedLightningBitmap != null &&
+                            uiState.selectedLightningFrame != null &&
+                            selectedLightningFrameReady
+                        ) {
+                            val lightningRect = viewport.radarRect(uiState.selectedLightningFrame.bounds)
+                            drawImage(
+                                image = selectedLightningBitmap,
+                                dstOffset = androidx.compose.ui.unit.IntOffset(
+                                    lightningRect.left.toInt(),
+                                    lightningRect.top.toInt()
+                                ),
+                                dstSize = androidx.compose.ui.unit.IntSize(
+                                    lightningRect.width.toInt(),
+                                    lightningRect.height.toInt()
+                                )
+                            )
+                        }
+
                         drawCityLabels(
                             viewport = viewport,
                             zoomPreset = uiState.zoomPreset,
@@ -634,10 +665,12 @@ fun RadarScreen(
                 maxScrollDp = maxScrollDp,
                 rainEnabled = uiState.rainLayerVisible,
                 cloudsEnabled = uiState.cloudLayerVisible,
+                lightningEnabled = uiState.lightningLayerVisible,
                 onExpandedChange = ::setLayerMenuExpanded,
                 onContentScrollChange = onLayerMenuScrollChange,
                 onToggleRain = onToggleRainLayer,
                 onToggleClouds = onToggleCloudLayer,
+                onToggleLightning = onToggleLightningLayer,
                 onAbout = {
                     setLayerMenuExpanded(false)
                     context.startActivity(Intent(context, AboutActivity::class.java))
@@ -805,10 +838,12 @@ private fun LayerMenuSheet(
     maxScrollDp: Float,
     rainEnabled: Boolean,
     cloudsEnabled: Boolean,
+    lightningEnabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onContentScrollChange: (Float) -> Unit,
     onToggleRain: () -> Unit,
     onToggleClouds: () -> Unit,
+    onToggleLightning: () -> Unit,
     onAbout: () -> Unit
 ) {
     val density = LocalDensity.current
@@ -816,68 +851,71 @@ private fun LayerMenuSheet(
     val screenHeightDp = configuration.screenHeightDp
     val currentContentScrollDp by rememberUpdatedState(contentScrollDp)
     val currentOnContentScrollChange by rememberUpdatedState(onContentScrollChange)
-    val sheetOffset by animateDpAsState(
-        targetValue = if (expanded) {
-            (screenHeightDp - 142f - contentScrollDp).coerceAtLeast(0f).dp
-        } else {
-            (screenHeightDp - 22f).dp
-        },
-        animationSpec = tween(durationMillis = 260)
+    val openOffsetDp = (screenHeightDp - 142f).coerceAtLeast(0f)
+    val closedOffsetDp = (screenHeightDp - 22f).coerceAtLeast(openOffsetDp)
+    val settledOffsetDp = if (expanded) {
+        (openOffsetDp - contentScrollDp).coerceAtLeast(0f)
+    } else {
+        closedOffsetDp
+    }
+    var isDragging by remember { mutableStateOf(false) }
+    var draggedOffsetDp by remember(closedOffsetDp) { mutableStateOf(closedOffsetDp) }
+    val displayedOffsetDp by animateFloatAsState(
+        targetValue = if (isDragging) draggedOffsetDp else settledOffsetDp,
+        animationSpec = if (isDragging) snap() else tween(durationMillis = 260)
     )
-    val sheetReveal by animateFloatAsState(
-        targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(durationMillis = 220)
-    )
-    var verticalDragTotal by remember { mutableStateOf(0f) }
-    var dragStartScrollDp by remember { mutableStateOf(0f) }
-    var dragLastScrollDp by remember { mutableStateOf(0f) }
+    val displayedReveal =
+        ((closedOffsetDp - displayedOffsetDp) / (closedOffsetDp - openOffsetDp).coerceAtLeast(1f))
+            .coerceIn(0f, 1f)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(screenHeightDp.dp)
-            .offset(y = sheetOffset)
-            .pointerInput(expanded) {
+            .offset(y = displayedOffsetDp.dp)
+            .pointerInput(expanded, openOffsetDp, closedOffsetDp, maxScrollDp) {
                 detectVerticalDragGestures(
                     onDragStart = {
-                        verticalDragTotal = 0f
-                        dragStartScrollDp = currentContentScrollDp
-                        dragLastScrollDp = currentContentScrollDp
+                        draggedOffsetDp = displayedOffsetDp
+                        isDragging = true
                     },
                     onVerticalDrag = { change, dragAmount ->
-                        verticalDragTotal += dragAmount
-                        if (expanded) {
-                            val dragDp = with(density) { verticalDragTotal.toDp().value }
-                            dragLastScrollDp = (dragStartScrollDp - dragDp)
-                                .coerceIn(0f, maxScrollDp)
-                            currentOnContentScrollChange(dragLastScrollDp)
-                        }
+                        val dragDp = with(density) { dragAmount.toDp().value }
+                        draggedOffsetDp = (draggedOffsetDp + dragDp).coerceIn(0f, closedOffsetDp)
                         change.consume()
                     },
                     onDragEnd = {
-                        when {
-                            !expanded && verticalDragTotal < -12f -> onExpandedChange(true)
-                            expanded && verticalDragTotal > 18f && dragLastScrollDp <= 1f -> {
-                                onExpandedChange(false)
+                        isDragging = false
+                        if (!expanded) {
+                            if (closedOffsetDp - draggedOffsetDp >= MENU_DRAG_SETTLE_THRESHOLD_DP) {
+                                onExpandedChange(true)
                             }
+                        } else if (draggedOffsetDp > openOffsetDp + MENU_DRAG_SETTLE_THRESHOLD_DP) {
+                            onExpandedChange(false)
+                        } else {
+                            currentOnContentScrollChange(
+                                (openOffsetDp - draggedOffsetDp).coerceIn(0f, maxScrollDp)
+                            )
                         }
                     },
-                    onDragCancel = { verticalDragTotal = 0f }
+                    onDragCancel = { isDragging = false }
                 )
             }
             .background(
-                color = Color(0xF20B111A).copy(alpha = 0.95f * sheetReveal),
+                color = Color(0xE60B111A).copy(alpha = 0.90f * displayedReveal),
                 shape = RoundedCornerShape(0.dp)
             ),
         contentAlignment = Alignment.TopCenter
     ) {
-        if (expanded) {
+        if (expanded || displayedReveal > 0f) {
             MenuSheetContent(
                 rainEnabled = rainEnabled,
                 cloudsEnabled = cloudsEnabled,
+                lightningEnabled = lightningEnabled,
                 onExpandedChange = onExpandedChange,
                 onToggleRain = onToggleRain,
                 onToggleClouds = onToggleClouds,
+                onToggleLightning = onToggleLightning,
                 onAbout = onAbout
             )
         } else {
@@ -903,9 +941,11 @@ private fun MenuSheetContent(
     modifier: Modifier = Modifier,
     rainEnabled: Boolean,
     cloudsEnabled: Boolean,
+    lightningEnabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onToggleRain: () -> Unit,
     onToggleClouds: () -> Unit,
+    onToggleLightning: () -> Unit,
     onAbout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -937,8 +977,8 @@ private fun MenuSheetContent(
                 label = context.getString(R.string.layer_rain),
                 enabled = rainEnabled,
                 onClick = onToggleRain
-            ) {
-                RainDropIcon(enabled = rainEnabled)
+            ) { color ->
+                RainDropIcon(color = color)
             }
             RadarLayerToggleButton(
                 label = context.getString(R.string.layer_clouds),
@@ -946,6 +986,18 @@ private fun MenuSheetContent(
                 onClick = onToggleClouds
             ) { color ->
                 CloudIcon(color = color)
+            }
+            RadarLayerToggleButton(
+                label = context.getString(R.string.layer_lightning),
+                enabled = lightningEnabled,
+                onClick = onToggleLightning
+            ) { color ->
+                Icon(
+                    imageVector = Icons.Rounded.FlashOn,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
         Box(
@@ -968,7 +1020,7 @@ private fun MenuSheetContent(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Settings,
+                    imageVector = Icons.Rounded.Info,
                     contentDescription = null,
                     tint = Color(0xFFEAF6FF),
                     modifier = Modifier.size(14.dp)
@@ -1062,7 +1114,7 @@ private fun RadarLayerToggleButton(
 }
 
 @Composable
-private fun RainDropIcon(enabled: Boolean) {
+private fun RainDropIcon(color: Color) {
     Canvas(modifier = Modifier.size(24.dp)) {
         fun svgX(value: Float): Float = size.width * value / 512f
         fun svgY(value: Float): Float = size.height * value / 512f
@@ -1076,39 +1128,7 @@ private fun RainDropIcon(enabled: Boolean) {
             close()
         }
 
-        if (enabled) {
-            drawPath(
-                path = dropPath,
-                brush = Brush.linearGradient(
-                    colorStops = arrayOf(
-                        0f to Color(0xFF73E7FF),
-                        0.46f to Color(0xFF3B82F6),
-                        1f to Color(0xFF7C3AED)
-                    ),
-                    start = Offset(svgX(142f), svgY(74f)),
-                    end = Offset(svgX(370f), svgY(440f))
-                )
-            )
-
-            val highlightPath = Path().apply {
-                moveTo(svgX(226f), svgY(116f))
-                cubicTo(svgX(191.5f), svgY(157.6f), svgX(166f), svgY(206.7f), svgX(157.7f), svgY(257.4f))
-                cubicTo(svgX(153.9f), svgY(280.5f), svgX(170.7f), svgY(287.8f), svgX(184.3f), svgY(268.6f))
-                cubicTo(svgX(203.1f), svgY(242.1f), svgX(229.4f), svgY(200.2f), svgX(271.6f), svgY(135.9f))
-                cubicTo(svgX(284.8f), svgY(115.8f), svgX(245.2f), svgY(92.9f), svgX(226f), svgY(116f))
-                close()
-            }
-            drawPath(
-                path = highlightPath,
-                brush = Brush.linearGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.504f), Color.Transparent),
-                    start = Offset(svgX(176f), svgY(118f)),
-                    end = Offset(svgX(280f), svgY(268f))
-                )
-            )
-        } else {
-            drawPath(path = dropPath, color = Color.White.copy(alpha = 0.8f))
-        }
+        drawPath(path = dropPath, color = color)
     }
 }
 
@@ -1918,6 +1938,7 @@ private const val DOUBLE_TAP_DRAG_TIMEOUT_MILLIS = 320L
 private const val GESTURE_LONG_PRESS_TIMEOUT_MILLIS = 520L
 private const val FRAME_DECODE_PROGRESS_CAP = 0.92f
 private const val LOADING_RING_DURATION_MILLIS = 900
+private const val MENU_DRAG_SETTLE_THRESHOLD_DP = 18f
 private const val MIN_RADIAL_SCROLL_DEGREES = 0.35f
 private const val LAYER_MENU_COLLAPSED_OFFSET_DP = 173f
 private const val LAYER_MENU_EXPANDED_OFFSET_DP = 48f

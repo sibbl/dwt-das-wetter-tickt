@@ -5,15 +5,20 @@ import net.sibbl.dwt.model.RadarTimeline
 import kotlin.math.absoluteValue
 
 class RadarTimelineBuilder(
-    private val layerKey: String = RadarBackend.PRECIPITATION_LAYER
+    private val layerKeys: List<String> = listOf(RadarBackend.PRECIPITATION_LAYER)
 ) {
+    constructor(layerKey: String) : this(listOf(layerKey))
+
     fun build(overview: RadarOverviewDto, fallbackNowMillis: Long): RadarTimeline {
         val framesByTimestamp = sortedMapOf<Long, RadarFrameReference>()
 
         overview.data
             .sortedBy { it.start }
             .forEach { section ->
-                val file = section.files[layerKey] ?: return@forEach
+                val layerEntry = layerKeys.firstNotNullOfOrNull { layerKey ->
+                    section.files[layerKey]?.let { file -> layerKey to file }
+                } ?: return@forEach
+                val (layerKey, file) = layerEntry
                 generateSequence(section.start) { current ->
                     current + file.timeStep
                 }

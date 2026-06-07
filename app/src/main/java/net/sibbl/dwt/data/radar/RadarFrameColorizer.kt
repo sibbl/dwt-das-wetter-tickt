@@ -1,7 +1,14 @@
 package net.sibbl.dwt.data.radar
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import net.sibbl.dwt.model.GeoBounds
+import net.sibbl.dwt.model.GeoPoint
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 object RadarFrameColorizer {
     private val palette = intArrayOf(
@@ -81,6 +88,96 @@ object RadarFrameColorizer {
         return mutableBitmap
     }
 
+    fun renderLightningMeasurements(source: ByteArray, bounds: GeoBounds): Bitmap {
+        val bitmap = Bitmap.createBitmap(LIGHTNING_BITMAP_SIZE, LIGHTNING_BITMAP_SIZE, Bitmap.Config.ARGB_8888)
+        if (source.isEmpty()) {
+            return bitmap
+        }
+        val canvas = Canvas(bitmap)
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = LIGHTNING_YELLOW
+            style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+            strokeJoin = Paint.Join.MITER
+        }
+        val boltPath = Path()
+        decodeLightningPoints(source, bounds).forEach { point ->
+            val latitude = point.latitude
+            val longitude = point.longitude
+            val x = (((longitude - bounds.southWest.longitude) /
+                (bounds.northEast.longitude - bounds.southWest.longitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
+            val y = (((bounds.northEast.latitude - latitude) /
+                (bounds.northEast.latitude - bounds.southWest.latitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
+            boltPath.setLightningBolt(x, y)
+            canvas.drawPath(boltPath, fillPaint)
+            canvas.drawPath(boltPath, borderPaint)
+        }
+        return bitmap
+    }
+
+    fun renderLightningForecast(source: Bitmap): Bitmap {
+        val bitmap = Bitmap.createBitmap(LIGHTNING_BITMAP_SIZE, LIGHTNING_BITMAP_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+            strokeJoin = Paint.Join.MITER
+        }
+        val boltPath = Path()
+        var outputY = LIGHTNING_FORECAST_GRID_SIZE / 2
+        while (outputY < LIGHTNING_BITMAP_SIZE) {
+            var outputX = LIGHTNING_FORECAST_GRID_SIZE / 2
+            while (outputX < LIGHTNING_BITMAP_SIZE) {
+                val intensity = maxForecastIntensity(
+                    source = source,
+                    outputX = outputX,
+                    outputY = outputY
+                )
+                val color = lightningForecastColorForIntensity(intensity)
+                if (color != Color.TRANSPARENT) {
+                    fillPaint.color = color
+                    boltPath.setLightningBolt(outputX.toFloat(), outputY.toFloat())
+                    canvas.drawPath(boltPath, fillPaint)
+                    canvas.drawPath(boltPath, borderPaint)
+                }
+                outputX += LIGHTNING_FORECAST_GRID_SIZE
+            }
+            outputY += LIGHTNING_FORECAST_GRID_SIZE
+        }
+        return bitmap
+    }
+
+    internal fun lightningForecastColorForIntensity(intensity: Int): Int {
+        return when {
+            intensity >= LIGHTNING_INTENSE_THRESHOLD -> LIGHTNING_RED
+            intensity >= LIGHTNING_THRESHOLD -> LIGHTNING_YELLOW
+            else -> TRANSPARENT
+        }
+    }
+
+    internal fun decodeLightningPoints(source: ByteArray, bounds: GeoBounds): List<GeoPoint> {
+        val buffer = ByteBuffer.wrap(source).order(ByteOrder.BIG_ENDIAN)
+        return buildList {
+            while (buffer.remaining() >= 8) {
+                val point = GeoPoint(
+                    latitude = buffer.float.toDouble(),
+                    longitude = buffer.float.toDouble()
+                )
+                if (bounds.contains(point)) {
+                    add(point)
+                }
+            }
+        }
+    }
+
     private fun colorizePixel(color: Int): Int {
         if (Color.alpha(color) == 0) {
             return Color.TRANSPARENT
@@ -145,4 +242,41 @@ object RadarFrameColorizer {
             .coerceIn(0, 178)
         return Color.argb(alpha, 232, 236, 241)
     }
+
+    private fun maxForecastIntensity(source: Bitmap, outputX: Int, outputY: Int): Int {
+        val outputLeft = (outputX - LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtLeast(0)
+        val outputTop = (outputY - LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtLeast(0)
+        val outputRight = (outputX + LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtMost(LIGHTNING_BITMAP_SIZE)
+        val outputBottom = (outputY + LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtMost(LIGHTNING_BITMAP_SIZE)
+        val sourceLeft = outputLeft * source.width / LIGHTNING_BITMAP_SIZE
+        val sourceTop = outputTop * source.height / LIGHTNING_BITMAP_SIZE
+        val sourceRight = (outputRight * source.width / LIGHTNING_BITMAP_SIZE).coerceAtLeast(sourceLeft + 1)
+        val sourceBottom = (outputBottom * source.height / LIGHTNING_BITMAP_SIZE).coerceAtLeast(sourceTop + 1)
+        var maximum = 0
+        for (y in sourceTop until sourceBottom.coerceAtMost(source.height)) {
+            for (x in sourceLeft until sourceRight.coerceAtMost(source.width)) {
+                maximum = maxOf(maximum, Color.red(source.getPixel(x, y)))
+            }
+        }
+        return maximum
+    }
+
+    private fun Path.setLightningBolt(x: Float, y: Float) {
+        reset()
+        moveTo(x + 0.5f, y - 5f)
+        lineTo(x - 3f, y + 0.5f)
+        lineTo(x - 0.5f, y + 0.5f)
+        lineTo(x - 1.5f, y + 5f)
+        lineTo(x + 3f, y - 1f)
+        lineTo(x + 0.5f, y - 1f)
+        close()
+    }
+
+    private const val LIGHTNING_FORECAST_GRID_SIZE = 12
+    private const val LIGHTNING_INTENSE_THRESHOLD = 170
+    private const val LIGHTNING_THRESHOLD = 85
+    private val LIGHTNING_RED = 0xFFFF3C00.toInt()
+    private val LIGHTNING_YELLOW = 0xFFFFC000.toInt()
+    private const val TRANSPARENT = 0
+    private const val LIGHTNING_BITMAP_SIZE = 384
 }

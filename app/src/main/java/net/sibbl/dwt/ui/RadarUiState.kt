@@ -18,12 +18,19 @@ data class RadarUiState(
     val selectedFrame: RadarBitmapFrame? = null,
     val rainLayerVisible: Boolean = true,
     val cloudLayerVisible: Boolean = true,
+    val lightningLayerVisible: Boolean = true,
     val cloudTimeline: RadarTimeline = RadarTimeline(
         frames = emptyList(),
         nowTimestampMillis = System.currentTimeMillis(),
         nowFrameIndex = 0
     ),
     val selectedCloudFrame: RadarBitmapFrame? = null,
+    val lightningTimeline: RadarTimeline = RadarTimeline(
+        frames = emptyList(),
+        nowTimestampMillis = System.currentTimeMillis(),
+        nowFrameIndex = 0
+    ),
+    val selectedLightningFrame: RadarBitmapFrame? = null,
     val frameLoadProgress: Map<Long, Float> = emptyMap(),
     val germanyOutlines: List<List<GeoPoint>> = emptyList(),
     val mapCamera: MapCamera,
@@ -33,6 +40,7 @@ data class RadarUiState(
     val isLocationLoading: Boolean = false,
     val decodedRainFrameTimestamps: Set<Long> = emptySet(),
     val decodedCloudFrameTimestamps: Set<Long> = emptySet(),
+    val decodedLightningFrameTimestamps: Set<Long> = emptySet(),
     val errorMessage: String? = null
 ) {
     val zoomPreset: ZoomPreset

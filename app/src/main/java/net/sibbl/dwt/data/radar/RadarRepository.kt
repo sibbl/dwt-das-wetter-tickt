@@ -39,6 +39,11 @@ class RadarRepository(
     suspend fun loadTimeline(
         forceRefresh: Boolean = false,
         layerKey: String = RadarBackend.PRECIPITATION_LAYER
+    ): RadarTimeline = loadTimeline(forceRefresh, listOf(layerKey))
+
+    suspend fun loadTimeline(
+        forceRefresh: Boolean = false,
+        layerKeys: List<String>
     ): RadarTimeline = withContext(Dispatchers.IO) {
         val cached = if (forceRefresh) null else cache.readOverview(maxAgeMillis = OVERVIEW_CACHE_AGE_MILLIS)
         val overviewJson = cached ?: overviewMutex.withLock {
@@ -46,7 +51,7 @@ class RadarRepository(
             secondLook ?: fetchText(RadarBackend.OVERVIEW_URL).also(cache::writeOverview)
         }
         val overview = json.decodeFromString<RadarOverviewDto>(overviewJson)
-        RadarTimelineBuilder(layerKey = layerKey).build(
+        RadarTimelineBuilder(layerKeys = layerKeys).build(
             overview = overview,
             fallbackNowMillis = clock()
         )
@@ -103,24 +108,35 @@ class RadarRepository(
         zipFile: File,
         cacheKey: String
     ): RadarBitmapFrame {
-        val decodedBitmap = ZipFile(zipFile).use { zip ->
-            zip.getInputStream(
-                zip.getEntry("${reference.timestampMillis}.png")
-                    ?: throw IOException("Missing PNG frame for ${reference.timestampMillis}")
-            ).use { input ->
-                BitmapFactory.decodeStream(input)
-                    ?: throw IOException("Failed to decode PNG frame for ${reference.timestampMillis}")
+        val bounds = loadBounds(reference)
+        val styledBitmap = ZipFile(zipFile).use { zip ->
+            val entry = zip.getEntry("${reference.timestampMillis}.png")
+                ?: throw IOException("Missing frame for ${reference.timestampMillis}")
+            if (reference.layerKey == RadarBackend.LIGHTNING_MEASUREMENT_LAYER) {
+                val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                RadarFrameColorizer.renderLightningMeasurements(bytes, bounds)
+            } else if (reference.layerKey == RadarBackend.LIGHTNING_FORECAST_LAYER) {
+                val decodedBitmap = zip.getInputStream(entry).use { input ->
+                    BitmapFactory.decodeStream(input)
+                        ?: throw IOException("Failed to decode lightning forecast for ${reference.timestampMillis}")
+                }
+                RadarFrameColorizer.renderLightningForecast(decodedBitmap)
+            } else {
+                val decodedBitmap = zip.getInputStream(entry).use { input ->
+                    BitmapFactory.decodeStream(input)
+                        ?: throw IOException("Failed to decode PNG frame for ${reference.timestampMillis}")
+                }
+                when (reference.layerKey) {
+                    RadarBackend.CLOUD_LAYER -> RadarFrameColorizer.colorizeCloud(decodedBitmap)
+                    else -> RadarFrameColorizer.colorizePrecipitation(decodedBitmap)
+                }
             }
-        }
-        val styledBitmap = when (reference.layerKey) {
-            RadarBackend.CLOUD_LAYER -> RadarFrameColorizer.colorizeCloud(decodedBitmap)
-            else -> RadarFrameColorizer.colorizePrecipitation(decodedBitmap)
         }
         bitmapCache.put(cacheKey, styledBitmap)
         return RadarBitmapFrame(
             reference = reference,
             bitmap = styledBitmap,
-            bounds = loadBounds(reference)
+            bounds = bounds
         )
     }
 
