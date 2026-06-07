@@ -2,8 +2,8 @@
 
 ## Project
 
-DWT – Das Wetter tickt is a standalone Wear OS app for viewing animated rain
-and cloud radar data on a round watch display. The package/application ID is
+DWT – Das Wetter tickt is a standalone Wear OS app for viewing animated rain,
+cloud, and lightning data on a round watch display. The package/application ID is
 `net.sibbl.dwt`.
 
 The app fetches DWD WarnWetter raster data directly on the watch. It supports
@@ -23,7 +23,7 @@ location permission.
   - `RadarBackend.kt`: DWD endpoint and layer identifiers.
   - `RadarRepository.kt`: overview/asset download, disk and bitmap caches, frame decoding.
   - `RadarTimelineBuilder.kt`: converts DWD overview sections into ordered frame timelines.
-  - `RadarFrameColorizer.kt`: converts source rasters into visible rain/cloud overlays.
+  - `RadarFrameColorizer.kt`: converts source data into visible rain/cloud/lightning overlays.
 - `app/src/main/java/net/sibbl/dwt/map/`
   - Geographic projection, viewport transforms, outlines, and city labels.
 - `app/src/main/java/net/sibbl/dwt/location/`
@@ -36,7 +36,7 @@ location permission.
 Data flow:
 
 1. `RadarRepository` fetches and parses the DWD overview.
-2. `RadarTimelineBuilder` creates rain/cloud timelines and identifies “now”.
+2. `RadarTimelineBuilder` creates rain/cloud/lightning timelines and identifies “now”.
 3. `RadarViewModel` selects, prefetches, decodes, and caches nearby frames.
 4. `RadarScreen` draws map context and decoded radar bitmaps through `MapViewport`.
 
@@ -47,7 +47,7 @@ Data flow:
   and visual verification on the watch.
 - Prefetch must prepare fully decoded frames, not only downloaded assets.
   Prioritize the selected segment and previous segment before future segments.
-- Keep rain and matching cloud frames navigation-near and ready together.
+- Keep rain and matching cloud/lightning frames navigation-near and ready together.
 - Location remains optional and must not be sent to the developer or DWD.
 - Never commit keystores, credentials, tokens, signing passwords, APKs, or AABs.
 - Do not remove or weaken DWD attribution, independence wording, privacy
