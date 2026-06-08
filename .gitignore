@@ -5,6 +5,7 @@ build/
 captures/
 local.properties
 .kotlin/
+.playwright-mcp/
 decompiled/
 *.apk
 *.aab

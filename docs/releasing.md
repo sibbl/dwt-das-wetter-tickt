@@ -30,20 +30,43 @@ base64 < release.jks | tr -d '\n'
 3. Run `.agents/skills/release-dwt/scripts/preflight.sh vMAJOR.MINOR.PATCH`.
 4. Create and publish a GitHub release using the next semantic version tag.
 5. Wait for the `Build release` workflow to attach the signed APK and AAB.
-6. Upload the AAB to the Wear OS track in Google Play Console.
+6. Upload the AAB to the Wear OS track in Google Play Console, or dispatch the
+   guarded `Publish Google Play release` workflow after the initial manual release.
 
 ## Google Play
+
+DWT is a paid app. Configure the customer-visible Germany price as **EUR 0.99
+before the first publication** and verify the displayed price after tax
+conversion. Do not publish it as free first; Google Play does not allow an app
+that has been offered for free to later become paid.
 
 Store listing materials are in `store-assets/`:
 
 - `play-store-icon.png`
 - `feature-graphic.png`
+- `phone-screenshots/`
 - `wear-screenshots/`
 - English and German listing copy in `listing/`
 
 Publish `PRIVACY.md` at a public URL and add that URL to the Play Console store
 listing. Complete the Play Console data safety and Wear OS declarations based
 on the app's optional location access and direct DWD network requests.
+
+The first AAB must be uploaded manually so package `net.sibbl.dwt`, pricing,
+store listing, declarations, and track eligibility exist in Play Console.
+
+For later releases, `.github/workflows/play-publish.yml` downloads the signed AAB
+from a GitHub release and uploads it through the Google Play Developer API.
+Configure:
+
+- GitHub secret `PLAY_SERVICE_ACCOUNT_JSON`: service-account JSON with release
+  permissions for `net.sibbl.dwt`
+- GitHub variable `PLAY_PUBLISH_ENABLED=true`: automatically publish every new
+  GitHub release to the `wear:production` track
+
+Leave the variable disabled to publish only through manual workflow dispatch.
+Manual track values are `wear:internal`, `wear:alpha`, `wear:beta`, and
+`wear:production`.
 
 The public privacy policy URL is:
 
