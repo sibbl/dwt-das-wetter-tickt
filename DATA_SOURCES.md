@@ -20,5 +20,4 @@ commercial use.
 Relevant DWD information:
 
 - https://www.dwd.de/DE/leistungen/opendata/opendata.html
-- https://www.dwd.de/DE/service/copyright/kennzeichnungspflicht/kennzeichnungspflicht_node.html
-- https://www.dwd.de/DE/service/copyright/copyright_node.html
+- https://opendata.dwd.de/climate_environment/CDC/Nutzungsbedingungen_German.pdf
