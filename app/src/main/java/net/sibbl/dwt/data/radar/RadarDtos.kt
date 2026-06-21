@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class RadarOverviewDto(
     val now: Long? = null,
+    val lastBlitzMeasurement: Long? = null,
+    val firstBlitzForecast: Long? = null,
     val data: List<RadarSectionDto> = emptyList()
 )
 
@@ -28,4 +30,3 @@ data class RadarFrameBoundsDto(
     val lowerLatitude: Double = 0.0,
     val lowerLongitude: Double = 0.0
 )
-
