@@ -156,4 +156,43 @@ class RadarTimelineBuilderTest {
             )
             .inOrder()
     }
+
+    @Test
+    fun build_prefersLightningForecastFromDwdForecastBoundaryWhenSectionsOverlap() {
+        val builder = RadarTimelineBuilder(RadarBackend.lightningLayers)
+        val overview = RadarOverviewDto(
+            now = 1_000L,
+            lastBlitzMeasurement = 1_200L,
+            firstBlitzForecast = 900L,
+            data = listOf(
+                RadarSectionDto(
+                    start = 600L,
+                    end = 1_500L,
+                    files = mapOf(
+                        RadarBackend.LIGHTNING_MEASUREMENT_LAYER to RadarFileDto(
+                            file = "measurement.zip",
+                            timeStep = 300L
+                        ),
+                        RadarBackend.LIGHTNING_FORECAST_LAYER to RadarFileDto(
+                            file = "forecast.zip",
+                            timeStep = 300L
+                        )
+                    )
+                )
+            )
+        )
+
+        val timeline = builder.build(overview, fallbackNowMillis = 0L)
+
+        assertThat(timeline.frames.map { it.timestampMillis })
+            .containsExactly(600L, 900L, 1_200L)
+            .inOrder()
+        assertThat(timeline.frames.map { it.layerKey })
+            .containsExactly(
+                RadarBackend.LIGHTNING_MEASUREMENT_LAYER,
+                RadarBackend.LIGHTNING_FORECAST_LAYER,
+                RadarBackend.LIGHTNING_FORECAST_LAYER
+            )
+            .inOrder()
+    }
 }

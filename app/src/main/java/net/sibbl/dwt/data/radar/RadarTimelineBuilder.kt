@@ -15,28 +15,27 @@ class RadarTimelineBuilder(
         overview.data
             .sortedBy { it.start }
             .forEach { section ->
-                val layerEntry = layerKeys.firstNotNullOfOrNull { layerKey ->
-                    section.files[layerKey]?.let { file -> layerKey to file }
-                } ?: return@forEach
-                val (layerKey, file) = layerEntry
-                generateSequence(section.start) { current ->
-                    current + file.timeStep
-                }
-                    .takeWhile { timestamp -> timestamp < section.end }
-                    .forEach { timestamp ->
-                        val candidate = RadarFrameReference(
-                            timestampMillis = timestamp,
-                            assetPath = file.file,
-                            timeStepMillis = file.timeStep,
-                            sectionStartMillis = section.start,
-                            sectionEndMillis = section.end,
-                            layerKey = layerKey
-                        )
-                        val existing = framesByTimestamp[timestamp]
-                        if (existing == null || candidate.timeStepMillis <= existing.timeStepMillis) {
-                            framesByTimestamp[timestamp] = candidate
-                        }
+                layerKeys.forEach { layerKey ->
+                    val file = section.files[layerKey] ?: return@forEach
+                    generateSequence(section.start) { current ->
+                        current + file.timeStep
                     }
+                        .takeWhile { timestamp -> timestamp < section.end }
+                        .forEach { timestamp ->
+                            val candidate = RadarFrameReference(
+                                timestampMillis = timestamp,
+                                assetPath = file.file,
+                                timeStepMillis = file.timeStep,
+                                sectionStartMillis = section.start,
+                                sectionEndMillis = section.end,
+                                layerKey = layerKey
+                            )
+                            val existing = framesByTimestamp[timestamp]
+                            if (existing == null || shouldReplaceFrame(existing, candidate, overview)) {
+                                framesByTimestamp[timestamp] = candidate
+                            }
+                        }
+                }
             }
 
         val frames = framesByTimestamp.values.toList()
@@ -58,5 +57,36 @@ class RadarTimelineBuilder(
             nowTimestampMillis = nowMillis,
             nowFrameIndex = nowFrameIndex
         )
+    }
+
+    private fun shouldReplaceFrame(
+        existing: RadarFrameReference,
+        candidate: RadarFrameReference,
+        overview: RadarOverviewDto
+    ): Boolean {
+        if (existing.layerKey != candidate.layerKey &&
+            existing.layerKey.isLightningLayer() &&
+            candidate.layerKey.isLightningLayer()
+        ) {
+            return candidate.layerKey == preferredLightningLayer(candidate.timestampMillis, overview)
+        }
+        return candidate.timeStepMillis <= existing.timeStepMillis
+    }
+
+    private fun preferredLightningLayer(timestampMillis: Long, overview: RadarOverviewDto): String {
+        val firstForecast = overview.firstBlitzForecast
+        if (firstForecast != null && timestampMillis >= firstForecast) {
+            return RadarBackend.LIGHTNING_FORECAST_LAYER
+        }
+        val lastMeasurement = overview.lastBlitzMeasurement
+        if (lastMeasurement != null && timestampMillis > lastMeasurement) {
+            return RadarBackend.LIGHTNING_FORECAST_LAYER
+        }
+        return RadarBackend.LIGHTNING_MEASUREMENT_LAYER
+    }
+
+    private fun String.isLightningLayer(): Boolean {
+        return this == RadarBackend.LIGHTNING_MEASUREMENT_LAYER ||
+            this == RadarBackend.LIGHTNING_FORECAST_LAYER
     }
 }

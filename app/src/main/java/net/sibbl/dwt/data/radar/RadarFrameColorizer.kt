@@ -98,12 +98,6 @@ object RadarFrameColorizer {
             color = LIGHTNING_YELLOW
             style = Paint.Style.FILL
         }
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            style = Paint.Style.STROKE
-            strokeWidth = 1f
-            strokeJoin = Paint.Join.MITER
-        }
         val boltPath = Path()
         decodeLightningPoints(source, bounds).forEach { point ->
             val latitude = point.latitude
@@ -113,8 +107,7 @@ object RadarFrameColorizer {
             val y = (((bounds.northEast.latitude - latitude) /
                 (bounds.northEast.latitude - bounds.southWest.latitude)) * LIGHTNING_BITMAP_SIZE).toFloat()
             boltPath.setLightningBolt(x, y)
-            canvas.drawPath(boltPath, fillPaint)
-            canvas.drawPath(boltPath, borderPaint)
+            canvas.drawLightningBolt(boltPath, fillPaint)
         }
         return bitmap
     }
@@ -124,12 +117,6 @@ object RadarFrameColorizer {
         val canvas = Canvas(bitmap)
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-        }
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            style = Paint.Style.STROKE
-            strokeWidth = 1f
-            strokeJoin = Paint.Join.MITER
         }
         val boltPath = Path()
         var outputY = LIGHTNING_FORECAST_GRID_SIZE / 2
@@ -145,8 +132,7 @@ object RadarFrameColorizer {
                 if (color != Color.TRANSPARENT) {
                     fillPaint.color = color
                     boltPath.setLightningBolt(outputX.toFloat(), outputY.toFloat())
-                    canvas.drawPath(boltPath, fillPaint)
-                    canvas.drawPath(boltPath, borderPaint)
+                    canvas.drawLightningBolt(boltPath, fillPaint)
                 }
                 outputX += LIGHTNING_FORECAST_GRID_SIZE
             }
@@ -261,14 +247,20 @@ object RadarFrameColorizer {
         return maximum
     }
 
+    private fun Canvas.drawLightningBolt(path: Path, fillPaint: Paint) {
+        drawPath(path, lightningHaloPaint)
+        drawPath(path, fillPaint)
+        drawPath(path, lightningStrokePaint)
+    }
+
     private fun Path.setLightningBolt(x: Float, y: Float) {
         reset()
-        moveTo(x + 0.5f, y - 5f)
-        lineTo(x - 3f, y + 0.5f)
-        lineTo(x - 0.5f, y + 0.5f)
-        lineTo(x - 1.5f, y + 5f)
-        lineTo(x + 3f, y - 1f)
-        lineTo(x + 0.5f, y - 1f)
+        moveTo(x + 0.7f, y - 6.5f)
+        lineTo(x - 3.5f, y + 0.6f)
+        lineTo(x - 0.7f, y + 0.6f)
+        lineTo(x - 1.8f, y + 6.5f)
+        lineTo(x + 3.7f, y - 1.0f)
+        lineTo(x + 0.8f, y - 1.0f)
         close()
     }
 
@@ -276,7 +268,25 @@ object RadarFrameColorizer {
     private const val LIGHTNING_INTENSE_THRESHOLD = 170
     private const val LIGHTNING_THRESHOLD = 85
     private val LIGHTNING_RED = 0xFFFF3C00.toInt()
-    private val LIGHTNING_YELLOW = 0xFFFFC000.toInt()
+    private val LIGHTNING_YELLOW = 0xFFFFFE00.toInt()
     private const val TRANSPARENT = 0
     private const val LIGHTNING_BITMAP_SIZE = 384
+    private val lightningHaloPaint by lazy {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCC000000.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 2.6f
+            strokeJoin = Paint.Join.MITER
+            strokeCap = Paint.Cap.SQUARE
+        }
+    }
+    private val lightningStrokePaint by lazy {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 0.9f
+            strokeJoin = Paint.Join.MITER
+            strokeCap = Paint.Cap.SQUARE
+        }
+    }
 }
