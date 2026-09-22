@@ -12,6 +12,7 @@ import java.io.File
 import java.io.IOException
 import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -30,6 +31,8 @@ class RadarRepository(
 ) {
     private val overviewMutex = Mutex()
     private val assetMutex = Mutex()
+    // Selected-frame loads and prefetch may request the same bitmap concurrently.
+    private val frameMutex = Mutex()
     private val bitmapCache = object : LruCache<String, Bitmap>(BITMAP_CACHE_FRAMES) {}
 
     fun resizeCache(newMaxSize: Int) {
@@ -74,31 +77,37 @@ class RadarRepository(
         reference: RadarFrameReference,
         onProgress: (Float) -> Unit = {}
     ): RadarBitmapFrame = withContext(Dispatchers.IO) {
-        val key = cacheKey(reference)
-        val bitmap = bitmapCache.get(key)
-        if (bitmap != null) {
-            onProgress(1f)
-            return@withContext RadarBitmapFrame(
-                reference = reference,
-                bitmap = bitmap,
-                bounds = loadBounds(reference)
-            )
-        }
+        frameMutex.withLock {
+            currentCoroutineContext().ensureActive()
+            val key = cacheKey(reference)
+            val bitmap = bitmapCache.get(key)
+            if (bitmap != null) {
+                onProgress(1f)
+                return@withLock RadarBitmapFrame(
+                    reference = reference,
+                    bitmap = bitmap,
+                    bounds = loadBounds(reference)
+                )
+            }
 
-        val zipFile = ensureAsset(reference.assetPath, onProgress = onProgress)
-        runCatching {
-            decodeFrame(reference = reference, zipFile = zipFile, cacheKey = key)
-        }.getOrElse { firstError ->
-            bitmapCache.remove(key)
-            val freshZipFile = ensureAsset(
-                assetPath = reference.assetPath,
-                forceRefresh = true,
-                onProgress = onProgress
-            )
+            val zipFile = ensureAsset(reference.assetPath, onProgress = onProgress)
+            currentCoroutineContext().ensureActive()
             runCatching {
-                decodeFrame(reference = reference, zipFile = freshZipFile, cacheKey = key)
-            }.getOrElse {
-                throw firstError
+                decodeFrame(reference = reference, zipFile = zipFile, cacheKey = key)
+            }.getOrElse { firstError ->
+                if (firstError is CancellationException) throw firstError
+                bitmapCache.remove(key)
+                val freshZipFile = ensureAsset(
+                    assetPath = reference.assetPath,
+                    forceRefresh = true,
+                    onProgress = onProgress
+                )
+                runCatching {
+                    decodeFrame(reference = reference, zipFile = freshZipFile, cacheKey = key)
+                }.getOrElse {
+                    if (it is CancellationException) throw it
+                    throw firstError
+                }
             }
         }
     }

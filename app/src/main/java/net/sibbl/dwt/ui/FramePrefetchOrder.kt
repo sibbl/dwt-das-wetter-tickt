@@ -17,13 +17,13 @@ internal fun <T> orderedLayerItemsForPrefetch(
             add(centerIndex)
             var distance = 1
             while (centerIndex - distance >= startIndex || centerIndex + distance < endExclusive) {
-                val futureIndex = centerIndex + distance
-                if (futureIndex < endExclusive) {
-                    add(futureIndex)
-                }
                 val pastIndex = centerIndex - distance
                 if (pastIndex >= startIndex) {
                     add(pastIndex)
+                }
+                val futureIndex = centerIndex + distance
+                if (futureIndex < endExclusive) {
+                    add(futureIndex)
                 }
                 distance++
             }
