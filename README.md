@@ -12,6 +12,8 @@ A standalone Wear OS app for viewing rain, cloud, and lightning data directly on
 - Pan and zoom controls designed for round watch displays
 - City labels, country outlines, and a compact timeline around the screen
 - Automatic refresh and frame caching for smooth playback
+- Decodes the full current timeline ring first, then preloads its previous and
+  next rings, including enabled cloud and lightning overlays
 
 ## Controls
 

@@ -13,7 +13,7 @@ class FramePrefetchOrderTest {
             centerIndex = 5
         )
 
-        assertEquals(listOf(5, 6, 4, 7, 3, 2), result)
+        assertEquals(listOf(5, 4, 6, 3, 7, 2), result)
     }
 
     @Test

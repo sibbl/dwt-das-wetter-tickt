@@ -17,12 +17,9 @@ import net.sibbl.dwt.model.ZoomPreset
 import net.sibbl.dwt.storage.RadarLayerPreferenceStore
 import net.sibbl.dwt.storage.MapCameraPreferenceStore
 import net.sibbl.dwt.storage.UserLocationPreferenceStore
-import java.util.LinkedHashMap
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,40 +38,9 @@ class RadarViewModel(
     private val rotaryStepAccumulator = RotaryStepAccumulator(ROTARY_TICKS_PER_STEP)
     private val radialStepAccumulator = RotaryStepAccumulator(RADIAL_DEGREES_PER_STEP)
     private val zoomSwipeAccumulator = RotaryStepAccumulator(ZOOM_SWIPE_PIXELS_PER_STEP)
-    @Volatile
-    private var maxLoadedFrames = MAX_LOADED_FRAMES
-    @Volatile
-    private var maxLoadedCloudFrames = MAX_LOADED_CLOUD_FRAMES
-    @Volatile
-    private var maxLoadedLightningFrames = MAX_LOADED_LIGHTNING_FRAMES
-
-    private val loadedFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
-        MAX_LOADED_FRAMES,
-        0.75f,
-        true
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, RadarBitmapFrame>?): Boolean {
-            return size > maxLoadedFrames
-        }
-    }
-    private val loadedCloudFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
-        MAX_LOADED_CLOUD_FRAMES,
-        0.75f,
-        true
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, RadarBitmapFrame>?): Boolean {
-            return size > maxLoadedCloudFrames
-        }
-    }
-    private val loadedLightningFrames = object : LinkedHashMap<Long, RadarBitmapFrame>(
-        MAX_LOADED_LIGHTNING_FRAMES,
-        0.75f,
-        true
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, RadarBitmapFrame>?): Boolean {
-            return size > maxLoadedLightningFrames
-        }
-    }
+    private val loadedFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
+    private val loadedCloudFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
+    private val loadedLightningFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
 
     private val _uiState = MutableStateFlow(
         radarLayerPreferenceStore.restore().let { layerPreferences ->
@@ -93,7 +59,22 @@ class RadarViewModel(
     private var cloudFrameJob: Job? = null
     private var lightningFrameJob: Job? = null
     private var timelineRefreshJob: Job? = null
-    private var prefetchJob: Job? = null
+    private val prefetcher = LayerPrefetcher<RadarFrameReference>(
+        scope = viewModelScope,
+        isReady = { reference -> cachedFrame(reference) != null },
+        load = { reference ->
+            val frame = radarRepository.loadFrame(reference) { progress ->
+                markAssetProgress(reference.assetPath, progress)
+            }
+            when (reference.layerKey) {
+                RadarBackend.CLOUD_LAYER -> rememberLoadedCloudFrame(frame)
+                in RadarBackend.lightningLayers -> rememberLoadedLightningFrame(frame)
+                else -> rememberLoadedFrame(frame)
+            }
+            // Scrubbing may select a frame while this queue is preparing it.
+            publishCachedSelection()
+        }
+    )
     private var longPressLocationRefreshJob: Job? = null
     private var longPressLocationRefreshGeneration = 0
     private var hasSavedMapCenter = mapCameraPreferenceStore.hasSavedCenter()
@@ -127,7 +108,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
-        updateCacheCapacities()
+        retainNavigationWindow()
         loadFrameAt(timeline.nowFrameIndex, force = true)
         loadCloudFrameForSelected(force = true)
         loadLightningFrameForSelected(force = true)
@@ -211,11 +192,13 @@ class RadarViewModel(
             )
         }
         radarLayerPreferenceStore.saveCloudVisible(nextVisible)
+        retainNavigationWindow()
         if (shouldLoadCloudTimeline) {
             refreshCloudTimeline()
         } else if (shouldLoadCloudFrame) {
             loadCloudFrameForSelected()
         }
+        scheduleSmartPrefetch(_uiState.value.selectedFrameIndex)
     }
 
     fun toggleLightningLayer() {
@@ -238,11 +221,13 @@ class RadarViewModel(
             )
         }
         radarLayerPreferenceStore.saveLightningVisible(nextVisible)
+        retainNavigationWindow()
         if (shouldLoadLightningTimeline) {
             refreshLightningTimeline()
         } else if (shouldLoadLightningFrame) {
             loadLightningFrameForSelected()
         }
+        scheduleSmartPrefetch(_uiState.value.selectedFrameIndex)
     }
 
     fun cycleZoom() {
@@ -289,7 +274,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
-        updateCacheCapacities()
+        retainNavigationWindow()
         persistMapCamera(updatedCamera)
         loadFrameAt(nowIndex, force = true)
         loadCloudFrameForSelected(force = true)
@@ -498,8 +483,9 @@ class RadarViewModel(
                         )
                     )
                 }
-                updateCacheCapacities()
+                retainNavigationWindow()
                 loadCloudFrameForSelected(force = true)
+                scheduleSmartPrefetch(_uiState.value.selectedFrameIndex)
             }
         }
     }
@@ -523,8 +509,9 @@ class RadarViewModel(
                         )
                     )
                 }
-                updateCacheCapacities()
+                retainNavigationWindow()
                 loadLightningFrameForSelected(force = true)
+                scheduleSmartPrefetch(_uiState.value.selectedFrameIndex)
             }
         }
     }
@@ -565,7 +552,7 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
-        updateCacheCapacities()
+        retainNavigationWindow()
         loadFrameAt(preservedIndex)
         loadCloudFrameForSelected()
         loadLightningFrameForSelected()
@@ -616,13 +603,11 @@ class RadarViewModel(
                 errorMessage = null
             )
         }
-        updateCacheCapacities()
+        retainNavigationWindow()
         loadFrameAt(clampedIndex)
         loadCloudFrameForSelected()
         loadLightningFrameForSelected()
-        if (pausePlayback) {
-            scheduleSmartPrefetch(clampedIndex)
-        }
+        scheduleSmartPrefetch(clampedIndex)
     }
 
     private fun loadFrameAt(index: Int, force: Boolean = false) {
@@ -694,174 +679,54 @@ class RadarViewModel(
     }
 
     private fun scheduleSmartPrefetch(centerIndex: Int) {
-        prefetchJob?.cancel()
-        val state = _uiState.value
-        val timeline = state.timeline
-        if (timeline.frames.isEmpty()) {
-            return
-        }
-        val layers = visualTimelineLayers(timeline)
-        val selectedLayerIndex = layers.indexOfFirst { layer ->
-            centerIndex in layer.startIndex until layer.endExclusive
-        }
-        if (selectedLayerIndex == -1) {
-            return
-        }
+        prefetcher.schedule(framePrefetchPlan(_uiState.value, centerIndex))
+    }
 
-        val selectedReference = timeline.frameAt(centerIndex)
-        val immediateRainFrames = listOfNotNull(
-            layers.getOrNull(selectedLayerIndex),
-            layers.getOrNull(selectedLayerIndex - 1)
-        ).flatMap { layer ->
-            orderedLayerItemsForPrefetch(
-                items = timeline.frames,
-                layerStartIndex = layer.startIndex,
-                layerEndExclusive = layer.endExclusive,
-                centerIndex = centerIndex
+    private fun rainPrefetchPlan(state: RadarUiState, centerIndex: Int) = buildLayerPrefetchPlan(
+        items = state.timeline.frames,
+        layers = visualTimelineLayers(state.timeline).map { it.startIndex until it.endExclusive },
+        centerIndex = centerIndex
+    )
+
+    private fun framePrefetchPlan(
+        state: RadarUiState,
+        centerIndex: Int
+    ): LayerPrefetchPlan<RadarFrameReference> {
+        val rainPlan = rainPrefetchPlan(state, centerIndex)
+        fun withOverlays(references: List<RadarFrameReference>) = references.flatMap { reference ->
+            listOfNotNull(
+                reference,
+                if (state.cloudLayerVisible) {
+                    closestCloudReference(reference.timestampMillis, state.cloudTimeline)
+                } else null,
+                if (state.lightningLayerVisible) {
+                    closestReference(reference.timestampMillis, state.lightningTimeline)
+                } else null
             )
-        }
-            .filter { it != selectedReference }
-            .distinctBy { it.timestampMillis }
-        val backgroundRainFrames = listOfNotNull(
-            layers.getOrNull(selectedLayerIndex + 1),
-            layers.getOrNull(selectedLayerIndex + 2)
-        ).flatMap { layer ->
-            orderedLayerItemsForPrefetch(
-                items = timeline.frames,
-                layerStartIndex = layer.startIndex,
-                layerEndExclusive = layer.endExclusive,
-                centerIndex = centerIndex
+        }.distinct()
+        return LayerPrefetchPlan(
+            currentLayer = withOverlays(rainPlan.currentLayer),
+            adjacentLayers = withOverlays(rainPlan.adjacentLayers)
+        )
+    }
+
+    private fun cachedFrame(reference: RadarFrameReference): RadarBitmapFrame? = when (reference.layerKey) {
+        RadarBackend.CLOUD_LAYER -> loadedCloudFrameFor(reference)
+        in RadarBackend.lightningLayers -> loadedLightningFrameFor(reference)
+        else -> loadedFrameFor(reference)
+    }
+
+    private fun publishCachedSelection() {
+        _uiState.update { state ->
+            val reference = state.timeline.frames.getOrNull(state.selectedFrameIndex)
+            val rainFrame = loadedFrameFor(reference)
+            state.copy(
+                selectedFrame = rainFrame,
+                selectedCloudFrame = loadedCloudFrameForSelected(reference?.timestampMillis),
+                selectedLightningFrame = loadedLightningFrameForSelected(reference?.timestampMillis),
+                isLoading = if (rainFrame != null) false else state.isLoading,
+                errorMessage = if (rainFrame != null) null else state.errorMessage
             )
-        }
-            .filter { it != selectedReference }
-            .distinctBy { it.timestampMillis }
-        val decodedRainFrames = (immediateRainFrames + backgroundRainFrames)
-            .distinctBy { it.timestampMillis }
-
-        prefetchJob = viewModelScope.launch {
-            delay(PREFETCH_START_DELAY_MILLIS)
-
-            // Decode navigation-near rain and cloud frames together before downloading distant assets.
-            decodedRainFrames.forEachIndexed { index, reference ->
-                currentCoroutineContext().ensureActive()
-                if (index >= immediateRainFrames.size) {
-                    delay(BACKGROUND_FRAME_DECODE_DELAY_MILLIS)
-                }
-                if (loadedFrameFor(reference) == null) {
-                    runCatching {
-                        radarRepository.loadFrame(reference) { loadProgress ->
-                            markAssetProgress(reference.assetPath, loadProgress)
-                        }
-                    }.onSuccess { frame ->
-                        rememberLoadedFrame(frame)
-                        markAssetProgress(frame.reference.assetPath, 1f)
-                    }.onFailure { throwable ->
-                        if (throwable is CancellationException) {
-                            throw throwable
-                        }
-                    }
-                }
-
-                if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
-                    closestCloudReference(reference.timestampMillis, state.cloudTimeline)?.let { cloudRef ->
-                        if (loadedCloudFrameFor(cloudRef) == null) {
-                            runCatching {
-                                radarRepository.loadFrame(cloudRef) { loadProgress ->
-                                    markAssetProgress(cloudRef.assetPath, loadProgress)
-                                }
-                            }.onSuccess { frame ->
-                                rememberLoadedCloudFrame(frame)
-                                markAssetProgress(frame.reference.assetPath, 1f)
-                            }.onFailure { throwable ->
-                                if (throwable is CancellationException) {
-                                    throw throwable
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (state.lightningLayerVisible && state.lightningTimeline.frames.isNotEmpty()) {
-                    closestReference(reference.timestampMillis, state.lightningTimeline)?.let { lightningRef ->
-                        if (loadedLightningFrameFor(lightningRef) == null) {
-                            runCatching {
-                                radarRepository.loadFrame(lightningRef) { loadProgress ->
-                                    markAssetProgress(lightningRef.assetPath, loadProgress)
-                                }
-                            }.onSuccess { frame ->
-                                rememberLoadedLightningFrame(frame)
-                                markAssetProgress(frame.reference.assetPath, 1f)
-                            }.onFailure { throwable ->
-                                if (throwable is CancellationException) {
-                                    throw throwable
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Download remaining assets only after nearby frames are decoded and ready to display.
-            val allOtherRainRefs = timeline.frames.filter { ref ->
-                ref !in decodedRainFrames
-            }
-            allOtherRainRefs.forEach { reference ->
-                delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
-                val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
-                if (progress < 1f) {
-                    runCatching {
-                        radarRepository.prefetchAsset(reference) { loadProgress ->
-                            markAssetProgress(reference.assetPath, loadProgress)
-                        }
-                    }.onFailure { throwable ->
-                        if (throwable is CancellationException) {
-                            throw throwable
-                        }
-                    }
-                }
-            }
-
-            if (state.cloudLayerVisible && state.cloudTimeline.frames.isNotEmpty()) {
-                val allOtherCloudRefs = allOtherRainRefs.mapNotNull { rainRef ->
-                    closestCloudReference(rainRef.timestampMillis, state.cloudTimeline)
-                }.distinctBy { it.assetPath }
-                allOtherCloudRefs.forEach { reference ->
-                    delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
-                    val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
-                    if (progress < 1f) {
-                        runCatching {
-                            radarRepository.prefetchAsset(reference) { loadProgress ->
-                                markAssetProgress(reference.assetPath, loadProgress)
-                            }
-                        }.onFailure { throwable ->
-                            if (throwable is CancellationException) {
-                                throw throwable
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (state.lightningLayerVisible && state.lightningTimeline.frames.isNotEmpty()) {
-                val allOtherLightningRefs = allOtherRainRefs.mapNotNull { rainRef ->
-                    closestReference(rainRef.timestampMillis, state.lightningTimeline)
-                }.distinctBy { it.assetPath }
-                allOtherLightningRefs.forEach { reference ->
-                    delay(BACKGROUND_PREFETCH_DELAY_MILLIS)
-                    val progress = _uiState.value.frameLoadProgress[reference.timestampMillis] ?: 0f
-                    if (progress < 1f) {
-                        runCatching {
-                            radarRepository.prefetchAsset(reference) { loadProgress ->
-                                markAssetProgress(reference.assetPath, loadProgress)
-                            }
-                        }.onFailure { throwable ->
-                            if (throwable is CancellationException) {
-                                throw throwable
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -986,100 +851,6 @@ class RadarViewModel(
                     throw throwable
                 }
             }
-        }
-    }
-
-    private fun buildFramePrefetchPlan(
-        timeline: RadarTimeline,
-        centerIndex: Int
-    ): List<RadarFrameReference> {
-        return buildLayerOrderedFrameReferences(
-            timeline = timeline,
-            centerIndex = centerIndex,
-            includeCenter = false
-        )
-            .take(maxLoadedFrames - 1)
-            .distinctBy { it.timestampMillis }
-    }
-
-    private fun buildAssetPrefetchPlan(
-        timeline: RadarTimeline,
-        centerIndex: Int
-    ): List<RadarFrameReference> {
-        val selectedReference = timeline.frameAt(centerIndex)
-        return buildLayerOrderedFrameReferences(
-            timeline = timeline,
-            centerIndex = centerIndex,
-            includeCenter = true
-        )
-            .filter { it.assetPath != selectedReference.assetPath }
-            .distinctBy { it.assetPath }
-    }
-
-    private fun buildLayerOrderedFrameReferences(
-        timeline: RadarTimeline,
-        centerIndex: Int,
-        includeCenter: Boolean
-    ): List<RadarFrameReference> {
-        if (timeline.frames.isEmpty() || centerIndex !in timeline.frames.indices) {
-            return emptyList()
-        }
-        val layers = visualTimelineLayers(timeline)
-        val selectedLayerIndex = layers.indexOfFirst { layer ->
-            centerIndex in layer.startIndex until layer.endExclusive
-        }
-        if (selectedLayerIndex == -1) {
-            return emptyList()
-        }
-
-        return buildList {
-            addAll(layerFrameIndices(layers[selectedLayerIndex], centerIndex, includeCenter))
-            var distance = 1
-            while (size < timeline.frames.size && (selectedLayerIndex - distance >= 0 || selectedLayerIndex + distance < layers.size)) {
-                val futureLayerIndex = selectedLayerIndex + distance
-                if (futureLayerIndex < layers.size) {
-                    addAll(layerFrameIndices(layers[futureLayerIndex], centerIndex, includeCenter = true))
-                }
-                val pastLayerIndex = selectedLayerIndex - distance
-                if (pastLayerIndex >= 0) {
-                    addAll(layerFrameIndices(layers[pastLayerIndex], centerIndex, includeCenter = true))
-                }
-                distance++
-            }
-        }
-            .filter { index -> index in timeline.frames.indices }
-            .map(timeline.frames::get)
-    }
-
-    private fun layerFrameIndices(
-        layer: VisualTimelineLayerRange,
-        centerIndex: Int,
-        includeCenter: Boolean
-    ): List<Int> {
-        if (centerIndex in layer.startIndex until layer.endExclusive) {
-            return buildList {
-                if (includeCenter) {
-                    add(centerIndex)
-                }
-                var distance = 1
-                while (centerIndex - distance >= layer.startIndex || centerIndex + distance < layer.endExclusive) {
-                    val futureIndex = centerIndex + distance
-                    if (futureIndex < layer.endExclusive) {
-                        add(futureIndex)
-                    }
-                    val pastIndex = centerIndex - distance
-                    if (pastIndex >= layer.startIndex) {
-                        add(pastIndex)
-                    }
-                    distance++
-                }
-            }
-        }
-
-        return if (layer.startIndex > centerIndex) {
-            (layer.startIndex until layer.endExclusive).toList()
-        } else {
-            (layer.endExclusive - 1 downTo layer.startIndex).toList()
         }
     }
 
@@ -1255,8 +1026,7 @@ class RadarViewModel(
         if (reference == null) {
             return null
         }
-        return loadedFrames[reference.timestampMillis]
-            ?.takeIf { it.reference == reference }
+        return loadedFrames[reference]
     }
 
     private fun loadedCloudFrameForSelected(
@@ -1277,14 +1047,13 @@ class RadarViewModel(
         if (reference == null) {
             return null
         }
-        return loadedLightningFrames[reference.timestampMillis]
-            ?.takeIf { it.reference == reference }
+        return loadedLightningFrames[reference]
     }
 
     private fun rememberLoadedLightningFrame(frame: RadarBitmapFrame) {
-        loadedLightningFrames[frame.reference.timestampMillis] = frame
+        loadedLightningFrames[frame.reference] = frame
         _uiState.update {
-            it.copy(decodedLightningFrameTimestamps = loadedLightningFrames.keys.toSet())
+            it.copy(decodedLightningFrameTimestamps = loadedLightningFrames.keys.map { it.timestampMillis }.toSet())
         }
     }
 
@@ -1292,13 +1061,12 @@ class RadarViewModel(
         if (reference == null) {
             return null
         }
-        return loadedCloudFrames[reference.timestampMillis]
-            ?.takeIf { it.reference == reference }
+        return loadedCloudFrames[reference]
     }
 
     private fun rememberLoadedCloudFrame(frame: RadarBitmapFrame) {
-        loadedCloudFrames[frame.reference.timestampMillis] = frame
-        _uiState.update { it.copy(decodedCloudFrameTimestamps = loadedCloudFrames.keys.toSet()) }
+        loadedCloudFrames[frame.reference] = frame
+        _uiState.update { it.copy(decodedCloudFrameTimestamps = loadedCloudFrames.keys.map { it.timestampMillis }.toSet()) }
     }
 
     private fun closestCloudReference(
@@ -1319,107 +1087,22 @@ class RadarViewModel(
     }
 
     private fun rememberLoadedFrame(frame: RadarBitmapFrame) {
-        loadedFrames[frame.reference.timestampMillis] = frame
-        _uiState.update { it.copy(decodedRainFrameTimestamps = loadedFrames.keys.toSet()) }
+        loadedFrames[frame.reference] = frame
+        _uiState.update { it.copy(decodedRainFrameTimestamps = loadedFrames.keys.map { it.timestampMillis }.toSet()) }
     }
 
-    private fun updateCacheCapacities() {
-        val timeline = _uiState.value.timeline
-        val cloudTimeline = _uiState.value.cloudTimeline
-        val lightningTimeline = _uiState.value.lightningTimeline
-        val selectedIndex = _uiState.value.selectedFrameIndex
-        val layers = visualTimelineLayers(timeline)
-        
-        val selectedLayerIndex = layers.indexOfFirst { layer ->
-            selectedIndex in layer.startIndex until layer.endExclusive
-        }
-        
-        var rainCount = 0
-        var cloudCount = 0
-        var lightningCount = 0
-        
-        if (selectedLayerIndex != -1) {
-            val currentLayer = layers[selectedLayerIndex]
-            val currentLayerFrames = timeline.frames.subList(
-                currentLayer.startIndex.coerceIn(timeline.frames.indices),
-                currentLayer.endExclusive.coerceIn(0, timeline.frames.size)
-            )
-            
-            val pastLayerFrames = if (selectedLayerIndex - 1 >= 0) {
-                val pastLayer = layers[selectedLayerIndex - 1]
-                timeline.frames.subList(
-                    pastLayer.startIndex.coerceIn(timeline.frames.indices),
-                    pastLayer.endExclusive.coerceIn(0, timeline.frames.size)
-                )
-            } else {
-                emptyList()
-            }
-            
-            val nextLayer1Frames = if (selectedLayerIndex + 1 < layers.size) {
-                val nextLayer = layers[selectedLayerIndex + 1]
-                timeline.frames.subList(
-                    nextLayer.startIndex.coerceIn(timeline.frames.indices),
-                    nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
-                )
-            } else {
-                emptyList()
-            }
-            
-            val nextLayer2Frames = if (selectedLayerIndex + 2 < layers.size) {
-                val nextLayer = layers[selectedLayerIndex + 2]
-                timeline.frames.subList(
-                    nextLayer.startIndex.coerceIn(timeline.frames.indices),
-                    nextLayer.endExclusive.coerceIn(0, timeline.frames.size)
-                )
-            } else {
-                emptyList()
-            }
-            
-            val rainFramesToLoad = currentLayerFrames + pastLayerFrames + nextLayer1Frames + nextLayer2Frames
-            rainCount = rainFramesToLoad.size
-            
-            if (cloudTimeline.frames.isNotEmpty()) {
-                val cloudFramesToLoad = rainFramesToLoad.mapNotNull { rainRef ->
-                    closestCloudReference(rainRef.timestampMillis, cloudTimeline)
-                }.distinctBy { it.timestampMillis }
-                cloudCount = cloudFramesToLoad.size
-            }
-            if (lightningTimeline.frames.isNotEmpty()) {
-                val lightningFramesToLoad = rainFramesToLoad.mapNotNull { rainRef ->
-                    closestReference(rainRef.timestampMillis, lightningTimeline)
-                }.distinctBy { it.timestampMillis }
-                lightningCount = lightningFramesToLoad.size
-            }
-        }
-        
-        val newMaxFrames = maxOf(MAX_LOADED_FRAMES, rainCount)
-        val newMaxCloudFrames = maxOf(MAX_LOADED_CLOUD_FRAMES, cloudCount)
-        val newMaxLightningFrames = maxOf(MAX_LOADED_LIGHTNING_FRAMES, lightningCount)
-        
-        maxLoadedFrames = newMaxFrames
-        maxLoadedCloudFrames = newMaxCloudFrames
-        maxLoadedLightningFrames = newMaxLightningFrames
-        
-        while (loadedFrames.size > maxLoadedFrames) {
-            val eldestKey = loadedFrames.keys.firstOrNull() ?: break
-            loadedFrames.remove(eldestKey)
-        }
-        while (loadedCloudFrames.size > maxLoadedCloudFrames) {
-            val eldestKey = loadedCloudFrames.keys.firstOrNull() ?: break
-            loadedCloudFrames.remove(eldestKey)
-        }
-        while (loadedLightningFrames.size > maxLoadedLightningFrames) {
-            val eldestKey = loadedLightningFrames.keys.firstOrNull() ?: break
-            loadedLightningFrames.remove(eldestKey)
-        }
-        
-        radarRepository.resizeCache(maxLoadedFrames + maxLoadedCloudFrames + maxLoadedLightningFrames)
-        
-        _uiState.update { state ->
-            state.copy(
-                decodedRainFrameTimestamps = loadedFrames.keys.toSet(),
-                decodedCloudFrameTimestamps = loadedCloudFrames.keys.toSet(),
-                decodedLightningFrameTimestamps = loadedLightningFrames.keys.toSet()
+    private fun retainNavigationWindow() {
+        val state = _uiState.value
+        val retained = framePrefetchPlan(state, state.selectedFrameIndex).retainedItems
+        loadedFrames.retain(retained.filter { it.layerKey == RadarBackend.PRECIPITATION_LAYER }.toSet())
+        loadedCloudFrames.retain(retained.filter { it.layerKey == RadarBackend.CLOUD_LAYER }.toSet())
+        loadedLightningFrames.retain(retained.filter { it.layerKey in RadarBackend.lightningLayers }.toSet())
+        radarRepository.resizeCache(retained.size.coerceAtLeast(1))
+        _uiState.update {
+            it.copy(
+                decodedRainFrameTimestamps = loadedFrames.keys.map { it.timestampMillis }.toSet(),
+                decodedCloudFrameTimestamps = loadedCloudFrames.keys.map { it.timestampMillis }.toSet(),
+                decodedLightningFrameTimestamps = loadedLightningFrames.keys.map { it.timestampMillis }.toSet()
             )
         }
     }
@@ -1441,18 +1124,10 @@ class RadarViewModel(
 
     private companion object {
         const val ANIMATION_FRAME_DELAY_MILLIS = 350L
-        const val BACKGROUND_FRAME_DECODE_DELAY_MILLIS = 80L
-        const val BACKGROUND_PREFETCH_DELAY_MILLIS = 900L
-        const val IMMEDIATE_PREFETCH_ASSET_COUNT = 2
         const val LONG_PRESS_LOCATION_FORCE_CENTER_MILLIS = 5_000L
         const val MAX_LAYER_MENU_SCROLL_DP = 76f
-        const val MAX_LOADED_CLOUD_FRAMES = 18
-        const val MAX_LOADED_LIGHTNING_FRAMES = 18
-        const val MAX_LOADED_FRAMES = 48
         const val MENU_SCROLL_DP_PER_TICK = 18f
-        const val MAX_PREFETCH_DECODE_FRAMES = MAX_LOADED_FRAMES - 1
         const val MAX_VISUAL_LAYER_SEGMENTS = 24
-        const val PREFETCH_START_DELAY_MILLIS = 150L
         const val BROAD_FORECAST_TIMESTEP_MILLIS = 60 * 60 * 1000L
         const val RADIAL_DEGREES_PER_STEP = 24f
         const val ROTARY_TICKS_PER_STEP = 0.15f
