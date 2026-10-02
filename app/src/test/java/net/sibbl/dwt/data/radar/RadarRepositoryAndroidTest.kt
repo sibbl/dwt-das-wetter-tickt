@@ -143,6 +143,58 @@ class RadarRepositoryAndroidTest {
         } finally { release.countDown(); repo.close() }
     }
 
+    @Test fun `all overlay timestamps deduplicate and survive ABAB restart and source refresh`() = runBlocking {
+        val directory = files.newFolder()
+        val calls = AtomicInteger()
+        val client = OkHttpClient.Builder().addInterceptor { error("Unexpected network") }.build()
+        val provider = OptionalFrameProvider { ref, _ ->
+            calls.incrementAndGet()
+            RadarBitmapFrame(ref, Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888), RadarBackend.defaultBounds)
+        }
+        fun fresh() = RadarRepository(RuntimeEnvironment.getApplication(), client, RadarDiskCache(directory) { 0L }, optionalFrames = provider)
+        val refs = listOf("PRECIPITATION", "CLOUD", "BLITZ_MEASUREMENT", "BLITZ_FORECAST").map { reference.copy(layerKey = it) }
+        var repo = fresh()
+        try {
+            for (ref in refs) {
+                val b = ref.copy(timestampMillis = 1500)
+                for (item in listOf(ref, b, ref, b)) {
+                    repo.retainFrames(setOf(item), setOf(item)); repo.loadFrame(item)
+                }
+            }
+            assertEquals(8, calls.get())
+            repo.close(); repo = fresh()
+            refs.forEach { repo.loadFrame(it) }
+            assertEquals(8, calls.get())
+            repo.loadFrame(refs[1].copy(assetPath = "updated.zip"))
+            assertEquals(9, calls.get())
+        } finally { repo.close() }
+    }
+
+    @Test fun `blocked overlay does not occupy rain companion lane`() = runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repo = repository(OkHttpClient(), OptionalFrameProvider { ref, _ ->
+            if (ref.layerKey == "CLOUD") { entered.complete(Unit); release.await() }
+            RadarBitmapFrame(ref, Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888), RadarBackend.defaultBounds)
+        })
+        try {
+            val overlay = async { repo.loadFrame(reference.copy(layerKey = "CLOUD"), false) }
+            entered.await()
+            withTimeout(2000) { assertEquals(reference, repo.loadFrame(reference).reference) }
+            release.complete(Unit); overlay.await(); Unit
+        } finally { release.complete(Unit); repo.close() }
+    }
+
+    @Test fun `stale companion identity falls back instead of poisoning cache`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(zipFrames().toResponseBody()).build()
+        }.build()
+        val repo = repository(client, OptionalFrameProvider { _, _ ->
+            RadarBitmapFrame(reference.copy(timestampMillis = 0), Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888), RadarBackend.defaultBounds)
+        })
+        try { assertEquals(32, repo.loadFrame(reference).bitmap.width) } finally { repo.close() }
+    }
+
     private fun repository(client: OkHttpClient, provider: OptionalFrameProvider? = null) = RadarRepository(
         RuntimeEnvironment.getApplication(), client,
         RadarDiskCache(files.newFolder()) { 0L }, optionalFrames = provider

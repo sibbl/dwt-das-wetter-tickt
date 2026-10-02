@@ -15,7 +15,10 @@ object RadarFrameWire {
     const val CHANNEL_PATH = "/dwt/radar/v1"
     const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
     const val MAX_DIMENSION = 4096
+    const val COMPACT_CAPABILITY = "dwt_all_frames_v2"
+    const val COMPACT_CHANNEL_PATH = "/dwt/radar/v2"
     private const val VERSION = 1
+    val layers = listOf("PRECIPITATION", "CLOUD", "BLITZ_MEASUREMENT", "BLITZ_FORECAST")
     private val json = Json { ignoreUnknownKeys = true }
 
     data class Frame(
@@ -69,6 +72,61 @@ object RadarFrameWire {
         val frame = Frame(south, west, north, east, phoneMillis, ByteArray(size).also(input::readFully))
         validateFrame(frame)
         return frame
+    }
+
+    // Binary v2 request avoids repeating JSON field names; every source-identity field is preserved.
+    fun writeCompactRequest(output: DataOutputStream, reference: RadarFrameReference, foreground: Boolean) {
+        validateCompact(reference)
+        output.writeByte(2); output.writeBoolean(foreground)
+        output.writeByte(layers.indexOf(reference.layerKey)); output.writeUTF(reference.assetPath)
+        output.writeLong(reference.timestampMillis); output.writeLong(reference.timeStepMillis)
+        output.writeLong(reference.sectionStartMillis); output.writeLong(reference.sectionEndMillis)
+        output.flush()
+    }
+
+    fun readCompactRequest(input: DataInputStream): Pair<RadarFrameReference, Boolean> {
+        if (input.readUnsignedByte() != 2) throw IOException("Incompatible radar protocol")
+        val foreground = input.readBoolean()
+        val layer = layers.getOrNull(input.readUnsignedByte()) ?: throw IOException("Invalid layer")
+        val path = input.readUTF()
+        val reference = RadarFrameReference(input.readLong(), path, input.readLong(), input.readLong(), input.readLong(), layer)
+        validateCompact(reference)
+        return reference to foreground
+    }
+
+    fun validateCompact(reference: RadarFrameReference) {
+        if (reference.layerKey !in layers || reference.assetPath.length > 1024) throw IOException("Invalid layer or path")
+        validate(reference.copy(layerKey = "PRECIPITATION"))
+    }
+
+    // Omit only the exact protocol-default bounds, never round coordinates.
+    private fun defaultBounds(frame: Frame) = frame.south == 43.75 && frame.west == 0.0 && frame.north == 57.0 && frame.east == 17.0
+    fun compactFrameBytes(frame: Frame) = 14 + (if (defaultBounds(frame)) 0 else 32) + frame.png.size
+
+    fun writeCompactFrame(output: DataOutputStream, frame: Frame) {
+        validateFrame(frame)
+        output.writeByte(2)
+        output.writeBoolean(!defaultBounds(frame))
+        if (!defaultBounds(frame)) {
+            output.writeDouble(frame.south); output.writeDouble(frame.west)
+            output.writeDouble(frame.north); output.writeDouble(frame.east)
+        }
+        output.writeLong(frame.phoneMillis); output.writeInt(frame.png.size); output.write(frame.png)
+        output.flush()
+    }
+
+    fun readCompactFrame(input: DataInputStream): Frame {
+        if (input.readUnsignedByte() != 2) throw IOException("Incompatible radar protocol")
+        val flag = input.readUnsignedByte()
+        if (flag !in 0..1) throw IOException("Invalid bounds flag")
+        val south = if (flag == 1) input.readDouble() else 43.75
+        val west = if (flag == 1) input.readDouble() else 0.0
+        val north = if (flag == 1) input.readDouble() else 57.0
+        val east = if (flag == 1) input.readDouble() else 17.0
+        val millis = input.readLong()
+        val size = input.readInt()
+        if (size !in 1..MAX_IMAGE_BYTES) throw IOException("Invalid image size")
+        return Frame(south, west, north, east, millis, ByteArray(size).also(input::readFully)).also(::validateFrame)
     }
 
     private fun validateFrame(frame: Frame) {

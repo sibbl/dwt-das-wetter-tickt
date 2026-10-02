@@ -51,9 +51,9 @@ Published GitHub releases automatically build signed APK and AAB artifacts from
 
 ## Optional companion prototype
 
-The `companion` module can preprocess rain frames on a compatible paired Android
+The `companion` module can preprocess rain, cloud, and lightning frames on a compatible paired Android
 phone. The watch discovers it automatically and falls back to standalone loading
-when unavailable. Cloud and lightning processing stays on the watch. See
+when unavailable. Layers are transferred losslessly and cached separately for reuse. See
 [performance comparison](docs/performance-comparison.md) for debug builds,
 matching-signature requirements, diagnostics, and hardware comparison steps.
 

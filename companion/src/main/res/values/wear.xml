@@ -1,5 +1,6 @@
 <resources>
     <string-array name="android_wear_capabilities">
         <item>dwt_rain_frames_v1</item>
+        <item>dwt_all_frames_v2</item>
     </string-array>
 </resources>

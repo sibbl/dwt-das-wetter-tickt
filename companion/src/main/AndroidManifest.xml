@@ -11,7 +11,7 @@
         <service android:name="net.sibbl.dwt.phone.RadarCompanionService" android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
-                <data android:scheme="wear" android:host="*" android:pathPrefix="/dwt/radar/v1" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/dwt/radar/" />
             </intent-filter>
         </service>
     </application>

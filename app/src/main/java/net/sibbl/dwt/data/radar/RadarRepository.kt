@@ -51,6 +51,7 @@ class RadarRepository(
     private val downloadGate = PriorityWorkGate(2)
     private val decodeGate = PriorityWorkGate(1)
     private val optionalFrameGate = PriorityWorkGate(1)
+    private val optionalOverlayGate = PriorityWorkGate(1)
     private val frameCache = NavigationFrameCache<RadarFrameReference, RadarBitmapFrame>(
         BITMAP_CACHE_BYTES
     ) { it.bitmap.allocationByteCount.toLong() }
@@ -111,6 +112,7 @@ class RadarRepository(
         if (foreground) {
             decodeGate.promote(key)
             optionalFrameGate.promote(key)
+            optionalOverlayGate.promote(key)
             downloadGate.promote(reference.assetPath)
         }
         sharedFrames.await(key) {
@@ -118,6 +120,7 @@ class RadarRepository(
             finally {
                 decodeGate.clearPromotion(key)
                 optionalFrameGate.clearPromotion(key)
+                optionalOverlayGate.clearPromotion(key)
                 downloadGate.clearPromotion(reference.assetPath)
             }
         }
@@ -144,10 +147,12 @@ class RadarRepository(
                 RadarPerformance.event("route=prepared time=${reference.timestampMillis} layer=${reference.layerKey}")
                 return@withContext it
             }
-            if (optionalFrames != null && reference.layerKey == RadarBackend.PRECIPITATION_LAYER) {
-                optionalFrameGate.run(key, foreground) {
+            if (optionalFrames != null) {
+                val gate = if (reference.layerKey == RadarBackend.PRECIPITATION_LAYER) optionalFrameGate else optionalOverlayGate
+                gate.run(key, foreground) {
                     // The selected request may have filled the cache while prefetch waited.
                     frameCache[reference] ?: tryOptionalFrame { optionalFrames.load(reference, foreground) }
+                        ?.takeIf { it.reference == reference }
                         ?.also { preparedFrames.write(it); frameCache[reference] = it }
                 }?.let { frame ->
                     onProgress(1f)
@@ -185,6 +190,24 @@ class RadarRepository(
             error("Unreachable frame decode")
         } finally {
             RadarPerformance.event("request layer=${reference.layerKey} time=${reference.timestampMillis} foreground=$foreground cacheHit=$cacheHit totalMs=${RadarPerformance.now() - started} cancelled=${!currentCoroutineContext().isActive}")
+        }
+    }
+
+    suspend fun measurementSource(reference: RadarFrameReference, foreground: Boolean): ByteArray = withContext(Dispatchers.IO) {
+        require(reference.layerKey == RadarBackend.LIGHTNING_MEASUREMENT_LAYER)
+        ZipFile(ensureAsset(reference.assetPath, foreground = foreground)).use { zip ->
+            val entry = zip.getEntry("${reference.timestampMillis}.png") ?: throw IOException("Missing measurements")
+            zip.getInputStream(entry).use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count == -1) break
+                    if (output.size() + count > 1024 * 1024) throw IOException("Too many measurements")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
         }
     }
 

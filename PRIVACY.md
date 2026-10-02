@@ -15,11 +15,11 @@ service to download rain, cloud, and lightning data. These network requests are
 subject to DWD's privacy practices and may expose standard connection
 information such as the device's IP address to DWD.
 
-An optional Android companion can download and process rain frames on the
+An optional Android companion can download and process rain, cloud, and lightning frames on the
 paired phone. The watch requests a weather asset and timestamp and receives a
-processed image and its static geographic bounds through the Wear OS Data Layer.
+compact lossless frame and its static geographic bounds through the Wear OS Data Layer.
 User location, map camera, and viewport are not included in these requests.
-Cloud and lightning processing remains on the watch. Without a compatible,
+Measured lightning may arrive as exact coordinates and is drawn by the same renderer on the watch. Without a compatible,
 reachable companion, the watch uses its direct DWD connection.
 
 Data Layer transport is managed by Google Play services and can use Bluetooth

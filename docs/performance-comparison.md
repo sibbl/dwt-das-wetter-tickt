@@ -1,6 +1,6 @@
 # Radar performance and optional companion prototype
 
-This change integrates watch loading improvements, an optional rain companion,
+This change integrates watch loading improvements, an optional weather companion,
 bounded prepared-frame caching and time-pill controls. See
 [time controls](time-controls.md) for gesture behavior.
 
@@ -39,25 +39,26 @@ bounded prepared-frame caching and time-pill controls. See
 
 ## Companion behavior
 
-The phone advertises `dwt_rain_frames_v1`. The watch discovers reachable compatible
-nodes and prefers nearby ones. Presence is rechecked after 15 seconds. If absent,
-unsupported, unavailable, disconnected, or processing/transfer fails, the local
-watch pipeline is used automatically. Discovery has a 1.5-second timeout; an
-active frame transfer has a 20-second timeout. Failures have a 15-second cooldown
-so other frames do not all wait on the same unavailable phone. A working current
-transfer is not preempted, but selected work precedes queued background work.
+The phone advertises both the original rain-only capability and `dwt_all_frames_v2`.
+New watches prefer v2; old phones still serve v1 rain, with standalone cloud/lightning.
+Old watches still receive v1 PNGs from new phones. Discovery has a 1.5-second timeout
+and a 15-second cache. Rain and overlays have separate priority queues, timeouts
+(20 and 8 seconds) and 15-second failure cooldowns. Selected work precedes queued
+prefetch. Active work is bounded, not preempted. Service destruction cancels its
+channel jobs, and the watch falls back to direct DWD loading.
 
-Only **rain frames** use the companion. The overview, clouds, lightning, camera,
-and optional device location remain on the watch. The phone downloads the source
-ZIP, extracts the requested timestamp, and applies exactly the same colorizer as
-standalone mode. It sends one lossless PNG in the original raster resolution,
-with static bounds, via a versioned on-demand Data Layer channel. No ring bundle,
-location, viewport, or account is sent. The transferred image is limited to 4 MiB
-and 4096 pixels per dimension; unsupported payloads fall back locally. No image
-is downscaled, so high zoom retains source detail. The phone keeps at most 12
-recent frame identities under the same hard bitmap cache budget, preferring its
-current request and retaining prepared frames in the bounded disk cache. Android may stop or force-stop the companion; fallback remains
-available. Opening the phone app once is useful during testing.
+All enabled weather layers can use the companion. Source identities, times, dimensions,
+colors, alpha and geographic bounds are preserved. V2 selects lossless palettes,
+constant RGB/alpha, solid images, exact repeated tiles, measured-lightning coordinates,
+or PNG according to complete payload size. Measurement coordinates retain their original
+float precision and draw order; the watch uses the shared lightning renderer.
+No display-size downsampling, map labels, location, viewport or account data is sent.
+The overview and camera remain on the watch. Responses are bounded to 4 MiB and
+4096 pixels per dimension. Cache-first lookup and shared frame loads avoid repeat
+transfers; full source identity and rendering revision invalidate prepared frames.
+
+See [compact companion measurements](companion-v2-results.md) for byte counts,
+composition tradeoffs and the limits of host timing measurements.
 
 Both APKs have application ID `net.sibbl.dwt`. Data Layer requires matching
 signing certificates on watch and phone. The debug APKs built on this Mac were
@@ -114,7 +115,7 @@ Inspect the installed versions and certificates before an update.
 
 1. Use the performance-branch watch APK and its companion APK, signed together.
    For an initial controlled comparison, enable only rain on the watch. Repeat
-   afterward with clouds and lightning enabled to measure their remaining cost.
+   afterward with clouds and lightning enabled to measure their combined cost.
 2. Standalone run: on the watch open the layer menu → Info, enable **Nur auf Uhr /
    Watch only**. For the next sample, restart the process to remove in-memory
    frames from the previous route. Restarting preserves preferences and disk cache.
