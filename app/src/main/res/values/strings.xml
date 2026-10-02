@@ -25,4 +25,10 @@
     <string name="about_github">Open Source</string>
     <string name="about_data_source">Datenbasis: Deutscher Wetterdienst (DWD), WarnWetter Rasterdaten bildlich wiedergegeben. Unabhängige App.</string>
     <string name="close">Schließen</string>
+    <string name="diagnostic_force_watch">Nur auf Uhr</string>
+    <string name="diagnostic_force_watch_hint">Aus: Companion automatisch nutzen, wenn erreichbar. An: alle Ebenen lokal verarbeiten. Für den Vergleich App neu starten.</string>
+    <string name="time_control_description">Uhrzeit: tippen für Jetzt, nach unten ziehen zum Aktualisieren</string>
+    <string name="time_select_now">Zur Jetzt-Zeit</string>
+    <string name="time_refreshing">Daten werden aktualisiert</string>
+    <string name="time_refresh_action">Daten aktualisieren</string>
 </resources>

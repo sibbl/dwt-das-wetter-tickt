@@ -8,6 +8,7 @@ import net.sibbl.dwt.model.ZoomPreset
 
 data class RadarUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val isPlaying: Boolean = false,
     val timeline: RadarTimeline = RadarTimeline(
         frames = emptyList(),

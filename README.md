@@ -21,6 +21,8 @@ A standalone Wear OS app for viewing rain, cloud, and lightning data directly on
 | --- | --- |
 | Move through time | Rotate the crown or drag around the screen edge |
 | Play or pause | Tap the map |
+| Return to now without moving the map | Tap the displayed time |
+| Refresh radar data | Pull down from the displayed time and release |
 | Pan the map | Drag the map |
 | Change zoom | Double-tap, or double-tap and drag vertically |
 | Return to now and your location | Long-press the map |
@@ -46,6 +48,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Published GitHub releases automatically build signed APK and AAB artifacts from
 `vMAJOR.MINOR.PATCH` tags. See [docs/releasing.md](docs/releasing.md).
+
+## Optional companion prototype
+
+The `companion` module can preprocess rain, cloud, and lightning frames on a compatible paired Android
+phone. The watch discovers it automatically and falls back to standalone loading
+when unavailable. Layers are transferred losslessly and cached separately for reuse. See
+[performance comparison](docs/performance-comparison.md) for debug builds,
+matching-signature requirements, diagnostics, and hardware comparison steps.
 
 ## Data Source
 

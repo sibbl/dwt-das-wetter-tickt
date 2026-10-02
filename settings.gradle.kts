@@ -19,3 +19,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "DwtWetterRadar"
 include(":app")
+
+include(":companion")

@@ -31,7 +31,11 @@ object RadarFrameColorizer {
     )
 
     fun colorizePrecipitation(source: Bitmap): Bitmap {
-        val mutableBitmap = source.copy(Bitmap.Config.ARGB_8888, true)
+        val mutableBitmap = if (source.isMutable && source.config == Bitmap.Config.ARGB_8888) {
+            source
+        } else {
+            source.copy(Bitmap.Config.ARGB_8888, true)
+        }
         val pixels = IntArray(mutableBitmap.width * mutableBitmap.height)
         mutableBitmap.getPixels(
             pixels,
@@ -60,7 +64,11 @@ object RadarFrameColorizer {
     }
 
     fun colorizeCloud(source: Bitmap): Bitmap {
-        val mutableBitmap = source.copy(Bitmap.Config.ARGB_8888, true)
+        val mutableBitmap = if (source.isMutable && source.config == Bitmap.Config.ARGB_8888) {
+            source
+        } else {
+            source.copy(Bitmap.Config.ARGB_8888, true)
+        }
         val pixels = IntArray(mutableBitmap.width * mutableBitmap.height)
         mutableBitmap.getPixels(
             pixels,
@@ -132,12 +140,15 @@ object RadarFrameColorizer {
             strokeJoin = Paint.Join.MITER
         }
         val boltPath = Path()
+        val sourcePixels = IntArray(source.width * source.height)
+        source.getPixels(sourcePixels, 0, source.width, 0, 0, source.width, source.height)
         var outputY = LIGHTNING_FORECAST_GRID_SIZE / 2
         while (outputY < LIGHTNING_BITMAP_SIZE) {
             var outputX = LIGHTNING_FORECAST_GRID_SIZE / 2
             while (outputX < LIGHTNING_BITMAP_SIZE) {
                 val intensity = maxForecastIntensity(
                     source = source,
+                    pixels = sourcePixels,
                     outputX = outputX,
                     outputY = outputY
                 )
@@ -243,7 +254,7 @@ object RadarFrameColorizer {
         return Color.argb(alpha, 232, 236, 241)
     }
 
-    private fun maxForecastIntensity(source: Bitmap, outputX: Int, outputY: Int): Int {
+    private fun maxForecastIntensity(source: Bitmap, pixels: IntArray, outputX: Int, outputY: Int): Int {
         val outputLeft = (outputX - LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtLeast(0)
         val outputTop = (outputY - LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtLeast(0)
         val outputRight = (outputX + LIGHTNING_FORECAST_GRID_SIZE / 2).coerceAtMost(LIGHTNING_BITMAP_SIZE)
@@ -255,7 +266,7 @@ object RadarFrameColorizer {
         var maximum = 0
         for (y in sourceTop until sourceBottom.coerceAtMost(source.height)) {
             for (x in sourceLeft until sourceRight.coerceAtMost(source.width)) {
-                maximum = maxOf(maximum, Color.red(source.getPixel(x, y)))
+                maximum = maxOf(maximum, Color.red(pixels[y * source.width + x]))
             }
         }
         return maximum

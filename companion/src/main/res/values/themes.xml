@@ -1,0 +1,21 @@
+<resources>
+    <style name="Theme.Dwt.Companion" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@color/phone_background</item>
+        <item name="android:colorAccent">@color/phone_accent</item>
+    </style>
+    <style name="PhoneBody">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/phone_secondary</item>
+        <item name="android:lineSpacingExtra">4dp</item>
+    </style>
+    <style name="PhoneTitle" parent="PhoneBody">
+        <item name="android:textSize">20sp</item>
+        <item name="android:textColor">@color/phone_text</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+</resources>

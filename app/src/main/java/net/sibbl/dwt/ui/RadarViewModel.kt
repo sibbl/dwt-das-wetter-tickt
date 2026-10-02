@@ -20,6 +20,7 @@ import net.sibbl.dwt.storage.UserLocationPreferenceStore
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,7 @@ import kotlinx.coroutines.launch
 class RadarViewModel(
     application: Application
 ) : AndroidViewModel(application) {
-    private val radarRepository = RadarRepository(application)
+    private val radarRepository = RadarRepository(application, optionalFrames = net.sibbl.dwt.companion.CompanionFrameClient(application))
     private val outlineRepository = GermanyOutlineRepository(application)
     private val locationRepository = LocationRepository(application)
     private val mapCameraPreferenceStore = MapCameraPreferenceStore(application)
@@ -38,9 +39,6 @@ class RadarViewModel(
     private val rotaryStepAccumulator = RotaryStepAccumulator(ROTARY_TICKS_PER_STEP)
     private val radialStepAccumulator = RotaryStepAccumulator(RADIAL_DEGREES_PER_STEP)
     private val zoomSwipeAccumulator = RotaryStepAccumulator(ZOOM_SWIPE_PIXELS_PER_STEP)
-    private val loadedFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
-    private val loadedCloudFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
-    private val loadedLightningFrames = FrameWindowCache<RadarFrameReference, RadarBitmapFrame>()
 
     private val _uiState = MutableStateFlow(
         radarLayerPreferenceStore.restore().let { layerPreferences ->
@@ -55,22 +53,22 @@ class RadarViewModel(
     )
     val uiState: StateFlow<RadarUiState> = _uiState.asStateFlow()
 
+    private var tracedSelection: RadarFrameReference? = null
+    private var selectionStartedMillis = 0L
+    private var selectionRainReported = false
+    private var selectionAllReported = false
     private var frameJob: Job? = null
     private var cloudFrameJob: Job? = null
     private var lightningFrameJob: Job? = null
     private var timelineRefreshJob: Job? = null
     private val prefetcher = LayerPrefetcher<RadarFrameReference>(
         scope = viewModelScope,
-        isReady = { reference -> cachedFrame(reference) != null },
+        isReady = radarRepository::isFramePrepared,
         load = { reference ->
-            val frame = radarRepository.loadFrame(reference) { progress ->
+            radarRepository.loadFrame(reference, foreground = false) { progress ->
                 markAssetProgress(reference.assetPath, progress)
             }
-            when (reference.layerKey) {
-                RadarBackend.CLOUD_LAYER -> rememberLoadedCloudFrame(frame)
-                in RadarBackend.lightningLayers -> rememberLoadedLightningFrame(frame)
-                else -> rememberLoadedFrame(frame)
-            }
+            updateCachedTimestamps()
             // Scrubbing may select a frame while this queue is preparing it.
             publishCachedSelection()
         }
@@ -250,6 +248,13 @@ class RadarViewModel(
         }
     }
 
+    /** Choose the existing timeline's now frame without refreshing or moving the map. */
+    fun selectNow() {
+        rotaryStepAccumulator.reset()
+        radialStepAccumulator.reset()
+        selectIndex(_uiState.value.timeline.nowFrameIndex, pausePlayback = true)
+    }
+
     fun resetToNowAndCenter() {
         val state = _uiState.value
         val nowIndex = state.timeline.nowFrameIndex
@@ -338,6 +343,7 @@ class RadarViewModel(
     }
 
     fun refreshRadarData() {
+        if (timelineRefreshJob?.isActive == true) return
         refreshTimeline(forceRefresh = true)
     }
 
@@ -398,6 +404,7 @@ class RadarViewModel(
             _uiState.update { state ->
                 state.copy(
                     isLoading = state.timeline.frames.isEmpty(),
+                    isRefreshing = true,
                     errorMessage = null
                 )
             }
@@ -412,6 +419,7 @@ class RadarViewModel(
                     val cloudTimeline = runCatching {
                         radarRepository.loadTimeline(layerKey = RadarBackend.CLOUD_LAYER)
                     }.getOrElse {
+                        if (it is CancellationException) throw it
                         RadarTimeline(
                             frames = emptyList(),
                             nowTimestampMillis = precipitationTimeline.nowTimestampMillis,
@@ -421,6 +429,7 @@ class RadarViewModel(
                     val lightningTimeline = runCatching {
                         radarRepository.loadTimeline(layerKeys = RadarBackend.lightningLayers)
                     }.getOrElse {
+                        if (it is CancellationException) throw it
                         RadarTimeline(
                             frames = emptyList(),
                             nowTimestampMillis = precipitationTimeline.nowTimestampMillis,
@@ -429,6 +438,7 @@ class RadarViewModel(
                     }
                     Triple(precipitationTimeline, cloudTimeline, lightningTimeline)
                 }.onSuccess { (precipitationTimeline, cloudTimeline, lightningTimeline) ->
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     applyTimelines(
                         timeline = precipitationTimeline,
                         cloudTimeline = cloudTimeline,
@@ -452,6 +462,7 @@ class RadarViewModel(
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         isPlaying = false,
                         errorMessage = throwable.message
                     )
@@ -535,6 +546,7 @@ class RadarViewModel(
             val reference = timeline.frames.getOrNull(preservedIndex)
             state.copy(
                 isLoading = false,
+                isRefreshing = false,
                 timeline = timeline,
                 cloudTimeline = cloudTimeline,
                 lightningTimeline = lightningTimeline,
@@ -593,6 +605,7 @@ class RadarViewModel(
         }
         val clampedIndex = index.coerceIn(0, timeline.frames.lastIndex)
         val reference = timeline.frameAt(clampedIndex)
+        beginSelectionTrace(reference)
         _uiState.update { state ->
             state.copy(
                 isPlaying = if (pausePlayback) false else state.isPlaying,
@@ -616,6 +629,7 @@ class RadarViewModel(
             return
         }
         val reference = timeline.frameAt(index)
+        beginSelectionTrace(reference)
         frameJob?.cancel()
         val cachedFrame = loadedFrameFor(reference)
         if (!force && cachedFrame != null) {
@@ -632,6 +646,7 @@ class RadarViewModel(
                     state
                 }
             }
+            reportSelectionTrace()
             return
         }
         frameJob = viewModelScope.launch {
@@ -644,7 +659,7 @@ class RadarViewModel(
                     markAssetProgress(reference.assetPath, progress)
                 }
             }.onSuccess { frame ->
-                rememberLoadedFrame(frame)
+                updateCachedTimestamps()
                 markAssetProgress(frame.reference.assetPath, 1f)
                 _uiState.update { state ->
                     val currentReference = state.timeline.frames.getOrNull(state.selectedFrameIndex)
@@ -658,6 +673,7 @@ class RadarViewModel(
                         state.copy(isLoading = false)
                     }
                 }
+                reportSelectionTrace()
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
                     throw throwable
@@ -728,6 +744,7 @@ class RadarViewModel(
                 errorMessage = if (rainFrame != null) null else state.errorMessage
             )
         }
+        reportSelectionTrace()
     }
 
     private fun loadCloudFrameForSelected(force: Boolean = false) {
@@ -762,6 +779,7 @@ class RadarViewModel(
                     state
                 }
             }
+            reportSelectionTrace()
             return
         }
 
@@ -775,7 +793,7 @@ class RadarViewModel(
                     markAssetProgress(reference.assetPath, progress)
                 }
             }.onSuccess { frame ->
-                rememberLoadedCloudFrame(frame)
+                updateCachedTimestamps()
                 markAssetProgress(frame.reference.assetPath, 1f)
                 _uiState.update { state ->
                     val currentTimestamp = state.timeline.frames
@@ -788,6 +806,7 @@ class RadarViewModel(
                         state
                     }
                 }
+                reportSelectionTrace()
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
                     throw throwable
@@ -824,6 +843,7 @@ class RadarViewModel(
                     state
                 }
             }
+            reportSelectionTrace()
             return
         }
         lightningFrameJob = viewModelScope.launch {
@@ -832,7 +852,7 @@ class RadarViewModel(
                     markAssetProgress(reference.assetPath, progress)
                 }
             }.onSuccess { frame ->
-                rememberLoadedLightningFrame(frame)
+                updateCachedTimestamps()
                 markAssetProgress(frame.reference.assetPath, 1f)
                 _uiState.update { state ->
                     val selectedTimestamp = state.timeline.frames
@@ -846,6 +866,7 @@ class RadarViewModel(
                         state
                     }
                 }
+                reportSelectionTrace()
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
                     throw throwable
@@ -1026,7 +1047,7 @@ class RadarViewModel(
         if (reference == null) {
             return null
         }
-        return loadedFrames[reference]
+        return radarRepository.cachedFrame(reference)
     }
 
     private fun loadedCloudFrameForSelected(
@@ -1047,26 +1068,14 @@ class RadarViewModel(
         if (reference == null) {
             return null
         }
-        return loadedLightningFrames[reference]
-    }
-
-    private fun rememberLoadedLightningFrame(frame: RadarBitmapFrame) {
-        loadedLightningFrames[frame.reference] = frame
-        _uiState.update {
-            it.copy(decodedLightningFrameTimestamps = loadedLightningFrames.keys.map { it.timestampMillis }.toSet())
-        }
+        return radarRepository.cachedFrame(reference)
     }
 
     private fun loadedCloudFrameFor(reference: RadarFrameReference?): RadarBitmapFrame? {
         if (reference == null) {
             return null
         }
-        return loadedCloudFrames[reference]
-    }
-
-    private fun rememberLoadedCloudFrame(frame: RadarBitmapFrame) {
-        loadedCloudFrames[frame.reference] = frame
-        _uiState.update { it.copy(decodedCloudFrameTimestamps = loadedCloudFrames.keys.map { it.timestampMillis }.toSet()) }
+        return radarRepository.cachedFrame(reference)
     }
 
     private fun closestCloudReference(
@@ -1086,23 +1095,68 @@ class RadarViewModel(
         }
     }
 
-    private fun rememberLoadedFrame(frame: RadarBitmapFrame) {
-        loadedFrames[frame.reference] = frame
-        _uiState.update { it.copy(decodedRainFrameTimestamps = loadedFrames.keys.map { it.timestampMillis }.toSet()) }
+    private fun updateCachedTimestamps() {
+        val references = radarRepository.cachedReferences()
+        _uiState.update {
+            it.copy(
+                decodedRainFrameTimestamps = references.filter { it.layerKey == RadarBackend.PRECIPITATION_LAYER }.map { it.timestampMillis }.toSet(),
+                decodedCloudFrameTimestamps = references.filter { it.layerKey == RadarBackend.CLOUD_LAYER }.map { it.timestampMillis }.toSet(),
+                decodedLightningFrameTimestamps = references.filter { it.layerKey in RadarBackend.lightningLayers }.map { it.timestampMillis }.toSet()
+            )
+        }
+    }
+
+    private fun beginSelectionTrace(reference: RadarFrameReference) {
+        if (tracedSelection == reference) return
+        tracedSelection = reference
+        selectionStartedMillis = net.sibbl.dwt.data.radar.RadarPerformance.now()
+        selectionRainReported = false
+        selectionAllReported = false
+        net.sibbl.dwt.data.radar.RadarPerformance.event("selection time=${reference.timestampMillis}")
+    }
+
+    private fun reportSelectionTrace() {
+        val state = _uiState.value
+        val reference = state.timeline.frames.getOrNull(state.selectedFrameIndex) ?: return
+        if (reference != tracedSelection) return
+        val elapsed = net.sibbl.dwt.data.radar.RadarPerformance.now() - selectionStartedMillis
+        val rainReady = state.selectedFrame?.reference == reference
+        if (rainReady && !selectionRainReported) {
+            selectionRainReported = true
+            net.sibbl.dwt.data.radar.RadarPerformance.event("selection rainReadyMs=$elapsed time=${reference.timestampMillis}")
+        }
+        val cloud = closestCloudReference(reference.timestampMillis, state.cloudTimeline)
+        val lightning = closestReference(reference.timestampMillis, state.lightningTimeline)
+        if ((!state.rainLayerVisible || rainReady) &&
+            (!state.cloudLayerVisible || cloud == null || state.selectedCloudFrame?.reference == cloud) &&
+            (!state.lightningLayerVisible || lightning == null || state.selectedLightningFrame?.reference == lightning) &&
+            !selectionAllReported
+        ) {
+            selectionAllReported = true
+            net.sibbl.dwt.data.radar.RadarPerformance.event("selection allVisibleReadyMs=$elapsed time=${reference.timestampMillis}")
+        }
+    }
+
+    override fun onCleared() {
+        radarRepository.close()
+        super.onCleared()
     }
 
     private fun retainNavigationWindow() {
         val state = _uiState.value
-        val retained = framePrefetchPlan(state, state.selectedFrameIndex).retainedItems
-        loadedFrames.retain(retained.filter { it.layerKey == RadarBackend.PRECIPITATION_LAYER }.toSet())
-        loadedCloudFrames.retain(retained.filter { it.layerKey == RadarBackend.CLOUD_LAYER }.toSet())
-        loadedLightningFrames.retain(retained.filter { it.layerKey in RadarBackend.lightningLayers }.toSet())
-        radarRepository.resizeCache(retained.size.coerceAtLeast(1))
+        val plan = framePrefetchPlan(state, state.selectedFrameIndex)
+        val selected = state.timeline.frames.getOrNull(state.selectedFrameIndex)
+        val visibleSelection = listOfNotNull(
+            selected,
+            if (state.cloudLayerVisible) closestCloudReference(selected?.timestampMillis, state.cloudTimeline) else null,
+            if (state.lightningLayerVisible && selected != null) closestReference(selected.timestampMillis, state.lightningTimeline) else null
+        ).toSet()
+        radarRepository.retainFrames(plan.retainedItems, visibleSelection)
         _uiState.update {
             it.copy(
-                decodedRainFrameTimestamps = loadedFrames.keys.map { it.timestampMillis }.toSet(),
-                decodedCloudFrameTimestamps = loadedCloudFrames.keys.map { it.timestampMillis }.toSet(),
-                decodedLightningFrameTimestamps = loadedLightningFrames.keys.map { it.timestampMillis }.toSet()
+                decodedRainFrameTimestamps = radarRepository.cachedReferences().filter { it.layerKey == RadarBackend.PRECIPITATION_LAYER }.map { it.timestampMillis }.toSet(),
+                decodedCloudFrameTimestamps = radarRepository.cachedReferences().filter { it.layerKey == RadarBackend.CLOUD_LAYER }.map { it.timestampMillis }.toSet(),
+                decodedLightningFrameTimestamps = radarRepository.cachedReferences().filter { it.layerKey in RadarBackend.lightningLayers }.map { it.timestampMillis }.toSet()
             )
         }
     }

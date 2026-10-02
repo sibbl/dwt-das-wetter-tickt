@@ -1,5 +1,6 @@
 package net.sibbl.dwt.model
 
+@kotlinx.serialization.Serializable
 data class RadarFrameReference(
     val timestampMillis: Long,
     val assetPath: String,

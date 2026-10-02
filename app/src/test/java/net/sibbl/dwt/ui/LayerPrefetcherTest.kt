@@ -192,5 +192,25 @@ class LayerPrefetcherTest {
         assertTrue(buildLayerPrefetchPlan(items, emptyList(), 0).retainedItems.isEmpty())
     }
 
+    @Test
+    fun `evicted adjacent frames do not cause repeated prefetch while current ring stays ready`() = runTest {
+        val ready = mutableSetOf<Int>()
+        val calls = mutableListOf<Int>()
+        val prefetcher = LayerPrefetcher<Int>(this, ready::contains) { item ->
+            calls += item
+            if (item in 1..3) ready += item // only the protected current ring fits
+        }
+        val plan = LayerPrefetchPlan(listOf(2, 1, 3), listOf(0, 4))
+        prefetcher.schedule(plan)
+        advanceUntilIdle()
+        prefetcher.schedule(plan)
+        advanceUntilIdle()
+        assertEquals(listOf(2, 1, 3, 0, 4), calls)
+        // An evicted adjacent frame must be decoded again when it becomes current.
+        prefetcher.schedule(LayerPrefetchPlan(listOf(4), listOf(3)))
+        advanceUntilIdle()
+        assertTrue(calls.count { it == 4 } > 1)
+    }
+
     private fun rings(count: Int) = List(count) { it * 24 until (it + 1) * 24 }
 }

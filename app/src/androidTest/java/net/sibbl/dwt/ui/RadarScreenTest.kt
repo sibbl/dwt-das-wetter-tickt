@@ -3,6 +3,8 @@ package net.sibbl.dwt.ui
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -84,18 +86,48 @@ class RadarScreenTest {
         )
 
         composeRule.onNodeWithContentDescription(mapDescription())
-            .performTouchInput { swipeLeft() }
+            .performTouchInput { swipe(center, center + Offset(-80f, 0f), 300L) }
 
         composeRule.waitForIdle()
         assertTrue(panDeltas.isNotEmpty())
         assertTrue(panDeltas.any { (dx, dy) -> abs(dx) > 0f || abs(dy) > 0f })
     }
 
+    @Test
+    fun timeTap_selectsNowWithoutRefreshOrMapActions() {
+        var now = 0; var refresh = 0; var pan = 0; var playback = 0; var reset = 0
+        setRadarContent(onSelectNow = { now++ }, onRefreshData = { refresh++ },
+            onPanMap = { _, _, _ -> pan++ }, onTogglePlayback = { playback++ }, onResetToNow = { reset++ })
+        composeRule.onNodeWithContentDescription(timeDescription()).performTouchInput { click() }
+        composeRule.mainClock.advanceTimeBy(500L)
+        composeRule.waitForIdle()
+        assertEquals(1, now)
+        assertEquals(0, refresh + pan + playback + reset)
+    }
+
+    @Test
+    fun timePull_refreshesOnceWithoutMapGesturesOrTap() {
+        var now = 0; var refresh = 0; var pan = 0; var playback = 0; var reset = 0
+        setRadarContent(onSelectNow = { now++ }, onRefreshData = { refresh++ },
+            onPanMap = { _, _, _ -> pan++ }, onTogglePlayback = { playback++ }, onResetToNow = { reset++ })
+        composeRule.onNodeWithContentDescription(timeDescription()).performTouchInput {
+            swipe(center, center + Offset(0f, 120f), 500L)
+        }
+        composeRule.mainClock.advanceTimeBy(500L)
+        composeRule.waitForIdle()
+        assertEquals(1, refresh)
+        assertEquals(0, now + pan + playback + reset)
+    }
+
+    private fun timeDescription() = composeRule.activity.getString(R.string.time_control_description)
+
     private fun setRadarContent(
         onTogglePlayback: () -> Unit = {},
         onCycleZoom: () -> Unit = {},
         onResetToNow: () -> Unit = {},
-        onPanMap: (Float, Float, Rect) -> Unit = { _, _, _ -> }
+        onPanMap: (Float, Float, Rect) -> Unit = { _, _, _ -> },
+        onSelectNow: () -> Unit = {},
+        onRefreshData: () -> Unit = {}
     ) {
         composeRule.setContent {
             MaterialTheme {
@@ -112,7 +144,8 @@ class RadarScreenTest {
                     onRadialScroll = {},
                     onZoomSwipe = {},
                     onGestureEnd = {},
-                    onRefreshData = {},
+                    onRefreshData = onRefreshData,
+                    onSelectNow = onSelectNow,
                     onToggleRainLayer = {},
                     onToggleCloudLayer = {},
                     onToggleLightningLayer = {},
