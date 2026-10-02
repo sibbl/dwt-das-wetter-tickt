@@ -45,14 +45,16 @@ internal class LayerPrefetcher<T>(
     private var job: Job? = null
     private var currentItems = emptySet<T>()
     private var adjacentItems = emptySet<T>()
+    private var adjacentPrepared = emptySet<T>()
 
     fun schedule(plan: LayerPrefetchPlan<T>) {
         val current = plan.currentLayer.toSet()
         val adjacent = plan.adjacentLayers.toSet() - current
         if (currentItems == current && adjacentItems == adjacent &&
-            (job?.isActive == true || plan.retainedItems.all(isReady))
+            (job?.isActive == true || (plan.currentLayer.all(isReady) && adjacentPrepared == adjacent))
         ) return
 
+        adjacentPrepared = emptySet()
         currentItems = current
         adjacentItems = adjacent
         val previousJob = job
@@ -67,20 +69,26 @@ internal class LayerPrefetcher<T>(
     }
 
     private suspend fun prepare(items: List<T>, background: Boolean = false): Boolean {
+        val prepared = mutableSetOf<T>()
         repeat(3) { attempt ->
             for (item in items.distinct()) {
                 currentCoroutineContext().ensureActive()
-                if (isReady(item)) continue
+                if (isReady(item) || (background && item in prepared)) {
+                    prepared += item
+                    continue
+                }
                 if (background) delay(80L)
                 try {
                     load(item)
+                    prepared += item
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
                     // Retry missing frames without preventing the rest of this ring loading.
                 }
             }
-            if (items.all(isReady)) return true
+            if (background) adjacentPrepared = prepared.toSet()
+            if (if (background) items.all { it in prepared } else items.all(isReady)) return true
             if (attempt < 2) delay(450L * (attempt + 1))
         }
         return false

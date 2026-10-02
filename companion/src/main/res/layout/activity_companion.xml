@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/companion_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="32dp">
+            <ImageView android:layout_width="64dp" android:layout_height="64dp"
+                android:src="@drawable/ic_launcher_foreground" android:background="@drawable/phone_icon"
+                android:importantForAccessibility="no" />
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical" android:layout_marginStart="16dp">
+                <TextView style="@style/PhoneBody" android:text="@string/brand_tagline"
+                    android:textSize="11sp" android:letterSpacing="0.12" android:textColor="@color/phone_accent" />
+                <TextView style="@style/PhoneTitle" android:text="@string/companion_title" android:textSize="22sp" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/PhoneTitle" android:text="@string/hero_title" android:textSize="36sp"
+            android:fontFamily="sans-serif-bold" android:lineSpacingExtra="0dp" android:accessibilityHeading="true" />
+        <TextView style="@style/PhoneBody" android:text="@string/hero_body" android:layout_marginTop="12dp"
+            android:layout_marginBottom="28dp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/phone_card" android:padding="24dp">
+            <TextView style="@style/PhoneTitle" android:text="@string/setup_title" android:accessibilityHeading="true"
+                android:layout_marginBottom="24dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <TextView android:layout_width="32dp" android:layout_height="wrap_content" android:minHeight="32dp"
+                    android:gravity="center" android:background="@drawable/phone_tint" android:text="@string/step_one"
+                    android:textSize="16sp" android:textColor="@color/phone_accent" android:importantForAccessibility="no" />
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:layout_marginStart="12dp">
+                    <TextView style="@style/PhoneTitle" android:text="@string/step_pair_title" android:textSize="16sp" />
+                    <TextView style="@style/PhoneBody" android:text="@string/step_pair_body" android:textSize="14sp" android:layout_marginTop="4dp" />
+                </LinearLayout>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="24dp">
+                <TextView android:layout_width="32dp" android:layout_height="wrap_content" android:minHeight="32dp"
+                    android:gravity="center" android:background="@drawable/phone_tint" android:text="@string/step_two"
+                    android:textSize="16sp" android:textColor="@color/phone_accent" android:importantForAccessibility="no" />
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:layout_marginStart="12dp">
+                    <TextView style="@style/PhoneTitle" android:text="@string/step_open_title" android:textSize="16sp" />
+                    <TextView style="@style/PhoneBody" android:text="@string/step_open_body" android:textSize="14sp" android:layout_marginTop="4dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/phone_tint" android:padding="24dp" android:layout_marginTop="16dp">
+            <TextView style="@style/PhoneTitle" android:text="@string/connection_note" android:textSize="16sp"
+                android:accessibilityHeading="true" android:textColor="@color/phone_accent" />
+            <TextView style="@style/PhoneBody" android:text="@string/connection_body" android:textSize="14sp"
+                android:layout_marginTop="8dp" android:textColor="@color/phone_text" />
+        </LinearLayout>
+        <TextView style="@style/PhoneBody" android:text="@string/local_note" android:textSize="14sp"
+            android:layout_marginTop="24dp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/phone_border"
+            android:layout_marginTop="12dp" android:layout_marginBottom="20dp" />
+        <TextView style="@style/PhoneBody" android:text="@string/attribution" android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

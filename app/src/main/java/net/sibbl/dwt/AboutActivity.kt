@@ -22,6 +22,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -160,6 +165,16 @@ private fun AboutContent() {
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, lineHeight = 13.sp)
             )
+            if (BuildConfig.DEBUG) {
+                val diagnostics = remember { context.getSharedPreferences("dwt_diagnostics", android.content.Context.MODE_PRIVATE) }
+                var forceWatch by remember { mutableStateOf(diagnostics.getBoolean("force_watch", false)) }
+                Text(context.getString(R.string.diagnostic_force_watch), color = Color.White, fontSize = 11.sp)
+                Switch(checked = forceWatch, onCheckedChange = {
+                    forceWatch = it
+                    diagnostics.edit().putBoolean("force_watch", it).apply()
+                })
+                Text(context.getString(R.string.diagnostic_force_watch_hint), color = Color(0xFFB0BDCA), fontSize = 10.sp, textAlign = TextAlign.Center)
+            }
             Text(
                 text = context.getString(R.string.about_data_source),
                 color = Color(0xFFB0BDCA),

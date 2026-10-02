@@ -1,0 +1,14 @@
+def benchmarkCode = System.getenv('DWT_BENCH_CODE')
+def benchmarkFixtures = System.getenv('DWT_BENCH_FIXTURES')
+if (!benchmarkCode || !benchmarkFixtures) {
+    throw new GradleException('Set DWT_BENCH_CODE and DWT_BENCH_FIXTURES to absolute directories')
+}
+allprojects {
+    plugins.withId('com.android.application') {
+        if (project.name == 'app') {
+            android.sourceSets.androidTest.java.srcDir(benchmarkCode)
+            android.sourceSets.androidTest.assets.srcDir(benchmarkFixtures)
+            dependencies.add('androidTestImplementation', 'com.google.android.gms:play-services-wearable:20.0.1')
+        }
+    }
+}

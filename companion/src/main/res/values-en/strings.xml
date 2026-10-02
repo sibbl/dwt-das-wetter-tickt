@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">DWT Companion</string>
+    <string name="brand_tagline">DAS WETTER TICKT</string>
+    <string name="companion_title">DWT Companion</string>
+    <string name="hero_title">Your watch.\nYour weather.</string>
+    <string name="hero_body">Your phone helps DWT on your watch prepare rain images. Automatically, whenever your watch requests them.</string>
+    <string name="setup_title">Connect once. Just use it.</string>
+    <string name="step_pair_title">Pair your watch with your phone</string>
+    <string name="step_pair_body">Use the companion app for your Wear OS watch.</string>
+    <string name="step_open_title">Open DWT on your watch</string>
+    <string name="step_open_body">When this phone is reachable, your watch can ask it to prepare rain images.</string>
+    <string name="connection_note">Connection &amp; transfer</string>
+    <string name="connection_body">This screen does not show live status. Check the About screen on your watch to see whether rain images are loaded through your phone.</string>
+    <string name="local_note">Your watch still processes clouds and lightning. No additional account is needed.</string>
+    <string name="attribution">Weather data: Deutscher Wetterdienst (DWD).\nIndependent project, not published by DWD.</string>
+</resources>

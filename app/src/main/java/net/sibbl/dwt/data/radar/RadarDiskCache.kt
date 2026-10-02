@@ -7,6 +7,7 @@ class RadarDiskCache(
     private val clock: () -> Long
 ) {
     private val rootDirectory = File(cacheDirectory, "dwd_radar").apply { mkdirs() }
+    internal val preparedDirectory = File(rootDirectory, "prepared-v1")
     private val overviewFile = File(rootDirectory, "animation_overview_v2.json")
     private val assetDirectory = File(rootDirectory, "assets").apply { mkdirs() }
 

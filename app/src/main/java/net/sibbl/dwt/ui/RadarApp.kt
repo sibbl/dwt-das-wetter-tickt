@@ -70,6 +70,7 @@ fun RadarApp(
         onZoomSwipe = viewModel::zoomBySwipe,
         onGestureEnd = viewModel::finishGestureInput,
         onRefreshData = viewModel::refreshRadarData,
+        onSelectNow = viewModel::selectNow,
         onToggleRainLayer = viewModel::toggleRainLayer,
         onToggleCloudLayer = viewModel::toggleCloudLayer,
         onToggleLightningLayer = viewModel::toggleLightningLayer,

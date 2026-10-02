@@ -25,4 +25,10 @@
     <string name="about_github">Open source</string>
     <string name="about_data_source">Data basis: German Weather Service (DWD), WarnWetter raster data reproduced visually. Independent app.</string>
     <string name="close">Close</string>
+    <string name="diagnostic_force_watch">Watch only</string>
+    <string name="diagnostic_force_watch_hint">Off: use companion automatically when reachable. On: process rain locally. Restart app for a fresh comparison.</string>
+    <string name="time_control_description">Time: tap for now, pull down to refresh</string>
+    <string name="time_select_now">Select now</string>
+    <string name="time_refreshing">Refreshing data</string>
+    <string name="time_refresh_action">Refresh data</string>
 </resources>

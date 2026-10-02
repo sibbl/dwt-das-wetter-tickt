@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -16,7 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +61,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -109,6 +110,13 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.core.keyframes
 import kotlinx.coroutines.flow.collect
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.gestures.awaitEachGesture
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
@@ -132,7 +140,8 @@ fun RadarScreen(
     onLayerMenuExpandedChange: (Boolean) -> Unit,
     onLayerMenuScroll: (Float) -> Unit,
     onLayerMenuScrollChange: (Float) -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onSelectNow: () -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -279,10 +288,20 @@ fun RadarScreen(
             repeatMode = RepeatMode.Restart
         )
     )
+    var timePullProgress by remember { mutableStateOf(0f) }
+    var timePullActive by remember { mutableStateOf(false) }
+    val currentSelectNow by rememberUpdatedState(onSelectNow)
+    val currentRefresh by rememberUpdatedState(onRefreshData)
+    val currentRefreshing by rememberUpdatedState(uiState.isRefreshing)
+    val animatedTimePull by animateFloatAsState(
+        targetValue = timePullProgress,
+        animationSpec = if (timePullActive) snap() else spring(dampingRatio = 0.72f, stiffness = 420f),
+        label = "timePullReturn"
+    )
     var timeRefreshPulseVisible by remember { mutableStateOf(false) }
     var timeRefreshPulseKey by remember { mutableStateOf(0) }
     val timeRefreshPulse by animateFloatAsState(
-        targetValue = if (timeRefreshPulseVisible || uiState.isLoading) 1f else 0f
+        targetValue = if (timeRefreshPulseVisible || uiState.isLoading || uiState.isRefreshing) 1f else 0f
     )
     var showZoomLabel by remember { mutableStateOf(false) }
     var previousZoomPreset by remember { mutableStateOf<ZoomPreset?>(null) }
@@ -598,14 +617,64 @@ fun RadarScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 16.dp)
-                    .clickable {
-                        timeRefreshPulseKey += 1
-                        onRefreshData()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume()
+                            val gesture = TimePillGesture(viewConfiguration.touchSlop, 32.dp.toPx())
+                            timePullActive = true
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || event.changes.any { it.id != down.id && it.pressed } || change.isConsumed) {
+                                        gesture.cancel()
+                                        break
+                                    }
+                                    val offset = change.position - down.position
+                                    val progress = gesture.update(offset.x, offset.y)
+                                    timePullProgress = if (currentRefreshing) 0f else progress
+                                    change.consume()
+                                    if (!change.pressed) {
+                                        when (gesture.finish()) {
+                                            TimePillGesture.Action.NOW -> currentSelectNow()
+                                            TimePillGesture.Action.REFRESH -> if (!currentRefreshing) {
+                                                timeRefreshPulseKey += 1
+                                                currentRefresh()
+                                            }
+                                            TimePillGesture.Action.NONE -> Unit
+                                        }
+                                        break
+                                    }
+                                }
+                            } finally {
+                                timePullActive = false
+                                timePullProgress = 0f
+                            }
+                        }
+                    }
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = context.getString(R.string.time_control_description)
+                        stateDescription = if (uiState.isRefreshing) context.getString(R.string.time_refreshing) else ""
+                        onClick(label = context.getString(R.string.time_select_now)) { onSelectNow(); true }
+                        customActions = listOf(CustomAccessibilityAction(context.getString(R.string.time_refresh_action)) {
+                            if (!currentRefreshing) {
+                                timeRefreshPulseKey += 1
+                                currentRefresh()
+                            }
+                            true
+                        })
+                    }
+                    .graphicsLayer {
+                        translationY = 8.dp.toPx() * animatedTimePull
+                        scaleX = 1f + animatedTimePull * 0.035f
+                        scaleY = 1f + animatedTimePull * 0.035f
                     },
                 borderColor = blendColor(
                     start = timelineAccent.copy(alpha = 0.14f),
                     end = timelineLayerAccent.copy(alpha = 0.62f),
-                    fraction = timeRefreshPulse
+                    fraction = maxOf(timeRefreshPulse, animatedTimePull.coerceIn(0f, 1f))
                 ),
                 bottomProgress = if (showSelectedLoadProgress) selectedDisplayProgress else null,
                 bottomProgressColor = timelineLayerAccent
@@ -614,6 +683,24 @@ fun RadarScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    if (!uiState.isRefreshing && animatedTimePull > 0.01f) {
+                        Canvas(Modifier.size(8.dp)) {
+                            drawArc(
+                                color = Color(0xFF8DEEFF),
+                                startAngle = -90f + animatedTimePull * 90f,
+                                sweepAngle = 300f * animatedTimePull.coerceIn(0f, 1f),
+                                useCenter = false,
+                                style = Stroke(width = 1.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            )
+                        }
+                    }
+                    if (uiState.isRefreshing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(8.dp),
+                            color = Color(0xFF8DEEFF),
+                            strokeWidth = 1.dp
+                        )
+                    }
                     Text(
                         text = TimeFormatters.absoluteTime(selectedTimestamp),
                         style = MaterialTheme.typography.titleMedium.copy(

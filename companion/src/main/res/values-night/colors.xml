@@ -1,0 +1,9 @@
+<resources>
+    <color name="phone_background">#0B111A</color>
+    <color name="phone_surface">#14202D</color>
+    <color name="phone_text">#EAF6FF</color>
+    <color name="phone_secondary">#B1C1D3</color>
+    <color name="phone_accent">#8DEEFF</color>
+    <color name="phone_tint">#1B3046</color>
+    <color name="phone_border">#2B4056</color>
+</resources>
